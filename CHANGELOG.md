@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.13.1"></a>
+## [9.13.1](https://github.com/WimImmelman/entity-controller/compare/v9.13.0...v9.13.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **module layout** – No behaviour change. `__init__.py` (2,994 lines) is split into per-concern modules: `schema.py`, `state_machine.py` (`build_machine()`), `entity.py` (`EntityController`), `model.py` (`Model`, assembled from mixins) and `model_events.py`, `model_timers.py`, `model_conditions.py`, `model_config.py`, `model_persistence.py`, `model_time_windows.py`, `model_control.py`. Every function body is unchanged (verified by syntax-tree comparison); per-controller logger names stay `custom_components.entity_controller.<name>`, so existing `logger:` settings keep working. The dead commented-out `adjust_times` helper is dropped.
+
+### Tests
+
+* The tests build the real state machine through `build_machine()` instead of a hand-copied transition table, so they can no longer drift from the component.
+
 <a name="9.13.0"></a>
 ## [9.13.0](https://github.com/WimImmelman/entity-controller/compare/v9.12.2...v9.13.0) (2026-09-17)
 
