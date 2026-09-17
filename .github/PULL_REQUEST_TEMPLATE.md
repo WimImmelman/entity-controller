@@ -3,7 +3,7 @@
 ## Checklist
 
 - [ ] The PR title is clear, concise and follows [`conventional commit`](https://www.conventionalcommits.org) formatting.
-- [ ] Double-check your branch is based on `develop` and targets `develop` 
+- [ ] Double-check your branch is based on the default branch and targets it
 - [ ] Issue raised to compliment this PR (if no pre-existing issue exists)
 - [ ] Code is commented, particularly in hard-to-understand areas and relevant issues are referenced.
 - [ ] Documentation repository updated to reflect new features or changes in behaviour (VERY IMPORTANT, undocumented features cannot be discovered and used!)

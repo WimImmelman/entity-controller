@@ -7,7 +7,7 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "pytest ./tests/test_lightingsm.py",
+    "test": "pytest tests/test_legacy_behaviors.py tests/test_new_features.py -q",
     "release": "standard-version -a"
   },
   "repository": {

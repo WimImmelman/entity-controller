@@ -1,5 +1,9 @@
+# Test dependencies. The tests import the component, which imports Home Assistant,
+# so `homeassistant` must be installed in the same environment as well (any release
+# your interpreter supports; the tests only touch helpers that have been stable
+# since 2023). See tests/README.md.
 pytest
-pytest-watch
-transitions[diagrams]==0.6.9
 pytest-mock
 freezegun
+transitions==0.8.8
+tzdata
