@@ -184,3 +184,30 @@ entity_controller:
 
 **When to use it:** Only needed for integrations where state-change events arrive with a context unrelated to the original EC service call (cloud integrations, gateway bridges, etc.). Standard local integrations — where HA propagates the service-call context through to the state-change event — are handled correctly by the existing context check and do not need this option.
 
+
+## Graceful Off (`graceful_off`)
+
+**Problem:** A controller that is in `active_timer` can be pushed out of it by two things that are not the timer: an override entity turning on (`overridden`) or its `end_time` arriving (`constrained`). Leaving `active` cancels the off-timer, and the entry behaviours of `overridden` and `constrained` default to `ignore`, so the light EC switched on a few minutes earlier is never switched off. Typical case: indoor controllers overridden by an "auto lights enabled" boolean that turns off shortly after sunrise, and outdoor controllers whose window ends at sunrise, both cutting off a timer started by motion minutes before.
+
+**Solution:** With `graceful_off: true` the running timer is kept when the controller moves into `overridden` or `constrained`. When it expires the control entities are switched off (only if they are still on) and the controller stays in its current state. Sensor triggers during that window are ignored, as they normally are in those states, so the light goes off exactly when it would have anyway. Moving into `idle`, `blocked` or `active` cancels the kept timer, so a light somebody re-toggled by hand is left alone. A pending run-out survives a Home Assistant restart through the state persistence layer.
+
+```yaml
+entity_controller:
+  kitchen:
+    sensors:
+      - binary_sensor.kitchen_pir
+    entities:
+      - light.kitchen
+    delay: 900
+    overrides:
+      - binary_sensor.auto_lights_blocked   # turns on after sunrise
+    graceful_off: true                      # a timer cut off by the override still switches the light off
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `graceful_off` | boolean | `false` | Keep the off-timer running when the controller is pushed from `active_timer` into `overridden` or `constrained`, and switch the control entities off when it expires. |
+
+Attributes while a run-out is pending: `graceful_off_expires_at`. After it fired: `graceful_off_at`.
+
+**Compared with `behaviours`:** `on_enter_overridden: 'off'` / `on_enter_constrained: 'off'` switch the light off immediately and also fire when entering those states from `pending` (every HA restart during the override window) or from `blocked` (a light switched on by hand). `on_exit_active: 'off'` is the zero-maintenance alternative if you prefer an immediate off over letting the timer run out.
