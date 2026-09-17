@@ -27,7 +27,6 @@ _LOGGER = logging.getLogger(__name__)
 from tests.test_new_features import (
     _make_hass,
     _make_entity,
-    _add_machine_transitions,
     _build_model,
 )
 

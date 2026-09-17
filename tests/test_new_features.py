@@ -44,164 +44,15 @@ def _make_entity():
     return entity
 
 
-def _add_machine_transitions(machine):
-    machine.add_transition(trigger="start_monitoring", source="pending", dest="idle")
-    machine.add_transition(trigger="constrain", source="*", dest="constrained")
-    machine.add_transition(
-        trigger="override",
-        source=["pending", "idle", "active_timer", "blocked"],
-        dest="overridden",
-    )
-    machine.add_transition(trigger="activate", source=["idle", "blocked"], dest="active")
-    machine.add_transition(
-        trigger="activate", source="active_timer", dest=None, after="_reset_timer"
-    )
-    machine.add_transition(
-        trigger="sensor_on", source="idle", dest="active",
-        conditions=["is_state_entities_off", "is_lux_constraint_satisfied"],
-    )
-    machine.add_transition(
-        trigger="sensor_on", source="idle", dest="active",
-        conditions=["is_state_entities_on"],
-        unless="is_block_enabled",
-    )
-    machine.add_transition(
-        trigger="sensor_on", source="idle", dest="blocked",
-        conditions=["is_state_entities_on", "is_block_enabled"],
-    )
-    machine.add_transition(
-        trigger="enable", source="idle", dest=None,
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="enable", source="blocked", dest="idle",
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="sensor_on", source="blocked", dest="blocked",
-        conditions=["is_block_enabled"],
-    )
-    machine.add_transition(
-        trigger="enable", source="overridden", dest="idle",
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="enable", source="overridden", dest="active",
-        conditions=["is_state_entities_on", "is_event_sensor"],
-    )
-    machine.add_transition(
-        trigger="enable", source="overridden", dest="active",
-        conditions=["is_state_entities_on", "is_sensor_on"],
-    )
-    machine.add_transition(
-        trigger="enable", source="overridden", dest="idle",
-        conditions=["is_state_entities_on", "is_duration_sensor", "is_sensor_off"],
-    )
-    machine.add_transition(
-        trigger="enter", source="active", dest="active_timer", unless="will_stay_on",
-    )
-    machine.add_transition(
-        trigger="enter", source="active", dest="active_stay_on", conditions="will_stay_on",
-    )
-    machine.add_transition(
-        trigger="sensor_on", source="active_timer", dest=None, after="_reset_timer",
-    )
-    machine.add_transition(
-        trigger="sensor_off_duration", source="active_timer", dest="idle",
-        conditions=["is_timer_expired"],
-    )
-    machine.add_transition(
-        trigger="timer_expires", source="active_timer", dest="idle",
-        conditions=["is_event_sensor"],
-    )
-    machine.add_transition(
-        trigger="timer_expires", source="active_timer", dest="idle",
-        conditions=["is_duration_sensor", "is_sensor_off"],
-    )
-    # Phase 1 fix: block_timer_expires → idle when entities already off
-    machine.add_transition(
-        trigger="block_timer_expires", source="blocked", dest="idle",
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="block_timer_expires", source="blocked", dest="active",
-        conditions=["is_state_entities_on", "is_event_sensor"],
-    )
-    machine.add_transition(
-        trigger="block_timer_expires", source="blocked", dest="active",
-        conditions=["is_state_entities_on", "is_sensor_on"],
-    )
-    machine.add_transition(
-        trigger="block_timer_expires", source="blocked", dest="idle",
-        conditions=["is_state_entities_on", "is_duration_sensor", "is_sensor_off"],
-    )
-    # Phase 2 fix: catch-all — covers sensor_off + state_entities_on (slow
-    # cloud integrations like Overkiz that report stale "on" state after
-    # block_timeout fires, while the trigger sensor is already off).
-    machine.add_transition(
-        trigger="block_timer_expires", source="blocked", dest="idle",
-    )
-    machine.add_transition(
-        trigger="control", source="active_timer", dest="idle",
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="control", source="active_timer", dest="blocked",
-        conditions=["is_state_entities_on", "is_block_enabled"],
-    )
-    machine.add_transition(
-        trigger="control", source="active_timer", dest=None,
-        after="_reset_timer", conditions=["is_state_entities_on"],
-        unless="is_block_enabled",
-    )
-    machine.add_transition(
-        trigger="block_enable", source="active_timer", dest="blocked",
-        conditions=["is_state_entities_on", "is_block_enabled"],
-    )
-    machine.add_transition(
-        trigger="enable", source="active_stay_on", dest="idle",
-        conditions=["is_state_entities_off"],
-    )
-    machine.add_transition(
-        trigger="enable", source="constrained", dest="idle",
-        conditions=["is_override_state_off"],
-    )
-    machine.add_transition(
-        trigger="enable", source="constrained", dest="overridden",
-        conditions=["is_override_state_on"],
-    )
-    machine.add_transition(
-        trigger="blocked", source="constrained", dest="blocked",
-        conditions=["is_block_enabled"],
-    )
-    # Phase 4: blocked reachable from idle (start_time while already idle)
-    machine.add_transition(
-        trigger="blocked", source="idle", dest="blocked",
-        conditions=["is_block_enabled"],
-    )
-    # Phase 3: force_activate bypasses all states
-    machine.add_transition(
-        trigger="force_activate",
-        source=["idle", "blocked", "constrained", "overridden", "active_timer"],
-        dest="active",
-    )
-
-
 def _build_model(hass=None, entity=None, config=None):
     """Build a fully initialised Model ready for state testing.
 
     _start_timer and _cancel_timer are patched to no-ops so background
     threading.Timer objects do not keep the process alive after tests finish.
     """
-    from transitions.extensions import HierarchicalMachine as Machine
-    from custom_components.entity_controller.const import STATES
+    from custom_components.entity_controller.state_machine import build_machine
 
-    machine = Machine(
-        states=STATES,
-        initial="pending",
-        finalize_event="finalize",
-    )
-    _add_machine_transitions(machine)
+    machine = build_machine()  # the real machine, not a copy of its transition table
 
     if hass is None:
         hass = _make_hass()
@@ -364,11 +215,9 @@ class TestBlockTimerExpiresIdleTransition:
     def test_block_timer_expires_new_transition_present_in_machine(self):
         """The machine must include the block_timer_expires→idle transition for
         the is_state_entities_off condition (Phase 1 fix)."""
-        from transitions.extensions import HierarchicalMachine as Machine
-        from custom_components.entity_controller.const import STATES
+        from custom_components.entity_controller.state_machine import build_machine
 
-        machine = Machine(states=STATES, initial="pending", finalize_event="finalize")
-        _add_machine_transitions(machine)
+        machine = build_machine()
 
         # Find transitions triggered by block_timer_expires from the blocked source.
         # The transitions library Condition object stores the function ref in .func
@@ -427,11 +276,9 @@ class TestBlockTimerExpiresIdleTransition:
     def test_block_timer_expires_catchall_transition_present_in_machine(self):
         """The machine must include an unconditional block_timer_expires→idle
         catch-all transition (Phase 2 fix)."""
-        from transitions.extensions import HierarchicalMachine as Machine
-        from custom_components.entity_controller.const import STATES
+        from custom_components.entity_controller.state_machine import build_machine
 
-        machine = Machine(states=STATES, initial="pending", finalize_event="finalize")
-        _add_machine_transitions(machine)
+        machine = build_machine()
 
         blocked_transitions = [
             t for t in machine.get_transitions("block_timer_expires")
@@ -1326,11 +1173,9 @@ class TestLuxConstraint:
     def test_lux_condition_present_in_machine(self):
         """The idle → active sensor_on transition must carry the lux condition
         alongside is_state_entities_off (and only that transition)."""
-        from transitions.extensions import HierarchicalMachine as Machine
-        from custom_components.entity_controller.const import STATES
+        from custom_components.entity_controller.state_machine import build_machine
 
-        machine = Machine(states=STATES, initial="pending", finalize_event="finalize")
-        _add_machine_transitions(machine)
+        machine = build_machine()
 
         def _condition_names(t):
             names = []
@@ -2149,7 +1994,7 @@ class TestReloadService:
         ):
             setattr(m, name, MagicMock())
         m._async_restore_state = AsyncMock(return_value=True)
-        with patch("custom_components.entity_controller.Store"):
+        with patch("custom_components.entity_controller.model.Store"):
             asyncio.run(m.startup_delay_callback(None))
         assert stop_unsub in m._unsubs
 
