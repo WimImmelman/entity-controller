@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.12.2"></a>
+## [9.12.2](https://github.com/WimImmelman/entity-controller/compare/v9.12.1...v9.12.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **graceful_off attribute** – The `graceful_off` config echo disappeared from the entity's attributes as soon as the controller entered `idle` (i.e. right after startup), because `reset_state()` only keeps attributes listed in `PERSISTED_STATE_ATTRIBUTES`. It is now persisted like the other config keys, so the flag is visible in the states tool in every state. First observed after the 9.12.0 deployment: `graceful_off: True` showed only on controllers that were in `active_timer`.
+
+### Tests
+
+* `TestGracefulOff.test_graceful_off_attribute_survives_idle_reset`: `reset_state()` keeps `graceful_off` and `delay`, drops `graceful_off_at`, `graceful_off_expires_at` and `expires_at`.
+
 <a name="9.12.1"></a>
 ## [9.12.1](https://github.com/WimImmelman/entity-controller/compare/v9.12.0...v9.12.1) (2026-09-17)
 
