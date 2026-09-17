@@ -12,9 +12,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/danobot/entity-controller"
+    "url": "https://github.com/WimImmelman/entity-controller"
   },
-  "author": "Daniel Mason",
+  "author": "Wim Immelman",
+  "contributors": [
+    "Daniel Mason (original author)",
+    "pluskal (2026 fork features)"
+  ],
   "license": "GNU General Public License v3.0",
   "devDependencies": {
     "replace-in-file": "^3.4.3",

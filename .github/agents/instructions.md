@@ -68,7 +68,7 @@ New entries go at the **top** of the file, immediately after the header block:
 
 ```markdown
 <a name="X.Y.Z"></a>
-## [X.Y.Z](https://github.com/pluskal/entity-controller/compare/vA.B.C...vX.Y.Z) (YYYY-MM-DD)
+## [X.Y.Z](https://github.com/WimImmelman/entity-controller/compare/vA.B.C...vX.Y.Z) (YYYY-MM-DD)
 
 
 ### Features
@@ -137,4 +137,4 @@ Before finishing a session, verify:
 - [ ] `README.md` is updated if any config keys or behaviours changed.
 - [ ] Tests pass (see §5).
 - [ ] All commits follow §1.
-- [ ] `report_progress` has been called to push changes.
+- [ ] Changes are pushed to `main` and, for a release, tagged `vX.Y.Z`.

@@ -1,16 +1,16 @@
-[![License](https://img.shields.io/github/license/danobot/entity-controller.svg?style=flat-square)](https://github.com/danobot/entity-controller/blob/develop/COPYING)
-[![Blog](https://img.shields.io/badge/blog-The%20Budget%20Smart%20Home-orange?style=flat-square)](https://danielbkr.net/?utm_source=github&utm_medium=badge&utm_campaign=entity-controller)
-[![donate paypal](https://img.shields.io/badge/donate-PayPal-blue.svg?style=flat-square)](https://paypal.me/danielb160)
-[![donate gofundme](https://img.shields.io/badge/donate-GoFundMe-orange?style=flat-square)](https://gofund.me/7a2487d5)
+[![License](https://img.shields.io/github/license/WimImmelman/entity-controller.svg?style=flat-square)](https://github.com/WimImmelman/entity-controller/blob/main/COPYING)
+[![Release](https://img.shields.io/github/v/tag/WimImmelman/entity-controller?style=flat-square&label=release)](https://github.com/WimImmelman/entity-controller/tags)
+
+This is a maintained fork of [danobot/entity-controller](https://github.com/danobot/entity-controller) by way of [pluskal/entity-controller](https://github.com/pluskal/entity-controller). See [Lineage](#lineage).
 
 
 # :wave: Introduction
 Entity Controller (EC) is an implementation of "When This, Then That for x amount of time" using a finite state machine that ensures basic automations do not interfere with the rest of your home automation setup. This component encapsulates common automation scenarios into a neat package that can be configured easily and reused throughout your home. Traditional automations would need to be duplicated _for each instance_ in your config. The use cases for this component are endless because you can use any entity as input and outputs (there is no restriction to motion sensors and lights).
 
-[Entity Controller Documentation](https://danobot.github.io/ec-docs/)
+The original [Entity Controller Documentation](https://danobot.github.io/ec-docs/) still covers the base options in depth; everything added since is documented in the [Configuration Reference](#configuration-reference) below.
 
 ## Installation
-EC is available in HACS store. Once installed, add the the following to your `configuration.yaml`, replacing the values for `sensor` and `entity` with one of your own. Reboot your Home Assistant server and you should have a motion controlled light that turns off after 5 seconds.
+Add `https://github.com/WimImmelman/entity-controller` to HACS as a custom repository (type *Integration*) and install *Entity Controller* from it. Once installed, add the the following to your `configuration.yaml`, replacing the values for `sensor` and `entity` with one of your own. Reboot your Home Assistant server and you should have a motion controlled light that turns off after 5 seconds.
 ```
 motion_light:
   sensor: binary_sensor.living_room_motion
@@ -18,20 +18,19 @@ motion_light:
   delay: 5
 ```
 ## :clapper: Video Demo
-I created the following video to give a high-level overview of all EC features, how they work and how you can configure them for your use cases.
+Daniel Mason, the original author, created the following video to give a high-level overview of all EC features, how they work and how you can configure them for your use cases.
 
 [![Video](images/video_thumbnail.png)](https://youtu.be/HJQrA6sFlPs)
 
-## Support
-Maintaining and improving this integration is very time consuming because of the sheer number of supported use cases. If you use this component in your home please donate a few dollars or check the issue tracker to help with the investigation of defects or the implementation of new features. I would be happy to receive your pull request.
+## Lineage
+- **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024). His [documentation site](https://danobot.github.io/ec-docs/) and [blog](https://danielbkr.net/) remain the best background reading.
+- **[pluskal](https://github.com/pluskal/entity-controller)** added, in 2026, state persistence with timer run-out across restarts, forced/event/hold sensors, the lux constraint, entity-driven night mode, `grace_period`, and a series of state-machine fixes (v9.8.0 to v9.11.1).
+- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0) and repository housekeeping.
 
-[![donate paypal](https://img.shields.io/badge/donate-PayPal-blue.svg?style=flat-square)](https://paypal.me/danielb160)
-[![donate gofundme](https://img.shields.io/badge/donate-GoFundMe-orange?style=flat-square)](https://gofund.me/7a2487d5)
+Licensed under the GPL-3.0, as the original. See [COPYING](COPYING).
 
 # Contributions
-All contributions are welcome, including raising issues. Expect to be involved in the resolution of any issues. 
-
-The `close-issue` bot is ruthless. Please provide all requested information to allow me to help you.
+Issues and pull requests are welcome at [github.com/WimImmelman/entity-controller](https://github.com/WimImmelman/entity-controller). Please include the controller's YAML and the relevant `entity_controller.*` state history when reporting a behaviour problem.
 
 ---
 

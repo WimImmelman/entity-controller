@@ -17,10 +17,12 @@ along with Entity Controller.  If not, see <https://www.gnu.org/licenses/>.
 """
 """
 Entity controller component for Home Assistant.
-Maintainer:       Daniel Mason
+Maintainer:       Wim Immelman (this fork)
+Original author:  Daniel Mason (github.com/danobot/entity-controller)
+Fork lineage:     github.com/pluskal/entity-controller (2026 features and fixes)
 Version:          v9.7.6
-Project Page:     https://danielbkr.net/projects/entity-controller/
-Documentation:    https://github.com/danobot/entity-controller
+Project Page:     https://github.com/WimImmelman/entity-controller
+Documentation:    https://github.com/WimImmelman/entity-controller/blob/main/README.md
 """
 import asyncio
 import functools
