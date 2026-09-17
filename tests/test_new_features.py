@@ -221,7 +221,6 @@ def _build_model(hass=None, entity=None, config=None):
         m.hass = hass
         m.entity = entity
         m.config = config
-        m.debug_day_length = None
         m.stateEntities = []
         m.controlEntities = []
         m.sensorEntities = ["binary_sensor.motion"]

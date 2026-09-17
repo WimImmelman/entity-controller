@@ -611,7 +611,6 @@ class Model:
             {}
         )  # new way of storing configuration (avoids having an attribue for each)
         self.config = config
-        self.debug_day_length = config.get("day_length", None)
         self.stateEntities = []
         self.controlEntities = []
         self.sensorEntities = []
@@ -1913,7 +1912,6 @@ class Model:
             )
 
     def config_other(self, config):
-        self.do_draw = config.get("draw", False)
         self.ignore_state_changes_until = datetime.now()
         self.homeassistant_turn_on_domains = ['group'] # domains that do not have their own turn_on service and rely on homeassistant.turn_on
 
@@ -1922,8 +1920,6 @@ class Model:
         self.block_timeout = config.get(CONF_BLOCK_TIMEOUT, None)
         self.grace_period = config.get(CONF_IGNORE_STATE_CHANGES_UNTIL, None)
         self.disable_block = config.get(CONF_DISABLE_BLOCK, False)
-        self.image_prefix = config.get("image_prefix", "/fsm_diagram_")
-        self.image_path = config.get("image_path", "/conf/temp")
         self.backoff = config.get("backoff", False)
         self.stay = config.get("stay_mode", False)
         self.graceful_off = config.get(CONF_GRACEFUL_OFF, False)
@@ -2216,8 +2212,6 @@ class Model:
         """
         self.log.debug("start_time_callback :: Triggered")
         # must be reparsed to get up to date sunset/sunrise times
-        # if self.debug_day_length:
-        #     x = self.make_naive(dt.now() + timedelta(seconds=int(self.debug_day_length)))
         #     self.log.debug("using debug day lengh %s", x)
         # else:
         x = self.parse_time(self.start_time)
@@ -2736,10 +2730,7 @@ class Model:
         # self.log.debug("current time: " + str(x))
         while t <= x:
             if t <= x:
-                if self.debug_day_length is not None:
-                    t = t + timedelta(seconds=int(self.debug_day_length))  # tomorrow!
-                else:
-                    t = t + timedelta(1)  # tomorrow!
+                t = t + timedelta(1)  # tomorrow!
                 # self.log.debug( "Time already happened. Returning tomorrow instead. " + str(t))
             else:
                 self.log.debug("Time still happening today. " + str(t))

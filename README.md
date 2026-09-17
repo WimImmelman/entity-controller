@@ -7,7 +7,7 @@ This is a maintained fork of [danobot/entity-controller](https://github.com/dano
 # :wave: Introduction
 Entity Controller (EC) is an implementation of "When This, Then That for x amount of time" using a finite state machine that ensures basic automations do not interfere with the rest of your home automation setup. This component encapsulates common automation scenarios into a neat package that can be configured easily and reused throughout your home. Traditional automations would need to be duplicated _for each instance_ in your config. The use cases for this component are endless because you can use any entity as input and outputs (there is no restriction to motion sensors and lights).
 
-The original [Entity Controller Documentation](https://danobot.github.io/ec-docs/) still covers the base options in depth; everything added since is documented in the [Configuration Reference](#configuration-reference) below.
+All options are documented in the [Configuration Reference](#configuration-reference) below.
 
 ## Installation
 Add `https://github.com/WimImmelman/entity-controller` to HACS as a custom repository (type *Integration*) and install *Entity Controller* from it. Once installed, add the the following to your `configuration.yaml`, replacing the values for `sensor` and `entity` with one of your own. Reboot your Home Assistant server and you should have a motion controlled light that turns off after 5 seconds.
@@ -17,13 +17,9 @@ motion_light:
   entity: light.tv_led
   delay: 5
 ```
-## :clapper: Video Demo
-Daniel Mason, the original author, created the following video to give a high-level overview of all EC features, how they work and how you can configure them for your use cases.
-
-[![Video](images/video_thumbnail.png)](https://youtu.be/HJQrA6sFlPs)
 
 ## Lineage
-- **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024). His [documentation site](https://danobot.github.io/ec-docs/) and [blog](https://danielbkr.net/) remain the best background reading.
+- **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024).
 - **[pluskal](https://github.com/pluskal/entity-controller)** added, in 2026, state persistence with timer run-out across restarts, forced/event/hold sensors, the lux constraint, entity-driven night mode, `grace_period`, and a series of state-machine fixes (v9.8.0 to v9.11.1).
 - **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0) and repository housekeeping.
 

@@ -6,12 +6,6 @@ Entity Controller (EC) is an implementation of "When This, Then That" using a fi
 
 **Full Documentation:** [README](https://github.com/WimImmelman/entity-controller/blob/main/README.md)
 
-## :clapper: Video Demo
-Daniel Mason, the original author, created the following video to give a high-level overview of all EC features, how they work and how you can configure them for your use cases.
-[Link](https://youtu.be/HJQrA6sFlPs)
-
-[![Video](images/video_thumbnail.png)](https://youtu.be/HJQrA6sFlPs)
-
 ## Basic Configuration
 The controller needs `sensors` to monitor (such as motion detectors, binary switches, doors, weather, etc) as well as an entity to control (such as a light).
 
