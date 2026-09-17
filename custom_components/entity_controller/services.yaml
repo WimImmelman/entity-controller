@@ -48,3 +48,9 @@ set_night_mode:
     end_time:
       description: new end time to set night mode to.
       example: sunset + 03:00:00 or '21:30:00' or now or constraint (set same as day end)
+
+reload:
+  description: Re-read the entity_controller YAML and rebuild every controller
+    without restarting Home Assistant. Invalid YAML is logged and the running
+    controllers are kept. Each controller persists its state before it is torn
+    down and restores it afterwards, exactly like after an HA restart.

@@ -285,6 +285,12 @@ def _build_model(hass=None, entity=None, config=None):
         m._pending_restore_is_graceful = False
         m._restore_retries = 0
         m.homeassistant_turn_on_domains = ["group"]
+        # reload support (see Model.async_teardown)
+        m._machine = machine
+        m._unsubs = []
+        m._torn_down = False
+        m.start_time_event_hook = None
+        m.end_time_event_hook = None
 
         DEFAULT_ON = ["on", "playing", "home", "True"]
         DEFAULT_OFF = ["off", "idle", "paused", "away", "False"]
@@ -2022,3 +2028,258 @@ class TestGracefulOff:
         m._restore_timer_finish()
         m.turn_off_control_entities.assert_not_called()
         assert m._pending_restore_expiry is None
+
+
+# ---------------------------------------------------------------------------
+# Reload service (entity_controller.reload)
+# ---------------------------------------------------------------------------
+
+class TestReloadService:
+    """Reload = validate YAML, tear every controller down, rebuild the set."""
+
+    def test_track_collects_cancel_callables(self):
+        m = _build_model()
+        unsub = MagicMock()
+        assert m._track(unsub) is unsub
+        assert unsub in m._unsubs
+        m._track(None)  # a listener helper that returned nothing is ignored
+        assert m._unsubs == [unsub]
+
+    def test_teardown_cancels_listeners_timers_and_detaches_model(self):
+        m = _build_model()
+        machine = m._machine
+        assert m in machine.models
+        unsub_a, unsub_b = MagicMock(), MagicMock()
+        m._unsubs = [unsub_a, unsub_b]
+        ev_cancel = MagicMock()
+        m._event_sensor_cancel_callbacks = [ev_cancel]
+        m.start_time_event_hook = MagicMock()
+        m.end_time_event_hook = MagicMock()
+        m._lux_recheck_handle = MagicMock()
+        m.block_timer_handle = MagicMock()
+        m.block_timer_handle.is_alive = MagicMock(return_value=True)
+
+        asyncio.run(m.async_teardown())
+
+        assert m._torn_down is True
+        unsub_a.assert_called_once()
+        unsub_b.assert_called_once()
+        ev_cancel.assert_called_once()
+        assert m._unsubs == []
+        assert m._event_sensor_cancel_callbacks == []
+        m._cancel_timer.assert_called_once()
+        m.block_timer_handle.cancel.assert_called_once()
+        assert m.start_time_event_hook is None
+        assert m.end_time_event_hook is None
+        assert m._lux_recheck_handle is None
+        assert m not in machine.models
+
+    def test_teardown_persists_state_first(self):
+        m = _build_model()
+        m._store = MagicMock()
+        m._store.async_save = AsyncMock()
+        asyncio.run(m.async_teardown())
+        m._store.async_save.assert_awaited_once()
+        saved = m._store.async_save.await_args.args[0]
+        assert saved["state"] == "idle"
+
+    def test_teardown_without_store_does_not_save(self):
+        m = _build_model()
+        m._store = None
+        asyncio.run(m.async_teardown())  # must not raise
+        assert m._torn_down is True
+
+    def test_teardown_is_idempotent(self):
+        m = _build_model()
+        asyncio.run(m.async_teardown())
+        asyncio.run(m.async_teardown())  # second call: model already detached, listeners empty
+        assert m._torn_down is True
+
+    def test_timer_callbacks_are_noops_after_teardown(self):
+        m = _build_model()
+        m._torn_down = True
+        m.timer_expires = MagicMock()
+        m.block_timer_expires = MagicMock()
+        m.turn_off_control_entities = MagicMock()
+        m._pending_restore_expiry = datetime.now()
+
+        m.timer_expire()
+        m.block_timer_expire()
+        m._restore_timer_finish()
+
+        m.timer_expires.assert_not_called()
+        m.block_timer_expires.assert_not_called()
+        m.turn_off_control_entities.assert_not_called()
+
+    def test_startup_delay_callback_is_noop_after_teardown(self):
+        m = _build_model()
+        m._torn_down = True
+        m.config_static_strings = MagicMock()
+        asyncio.run(m.startup_delay_callback(None))
+        m.config_static_strings.assert_not_called()
+
+    def test_listener_registrations_are_tracked(self):
+        m = _build_model()
+        m.controlEntities = ["light.test"]
+        unsubs = [MagicMock(name=f"unsub{i}") for i in range(5)]
+        with patch(
+            "custom_components.entity_controller.event.async_track_state_change_event",
+            side_effect=unsubs,
+        ):
+            m.config_sensor_entities({"sensors": ["binary_sensor.a"]})
+            m.config_hold_sensor_entities({"hold_sensors": ["binary_sensor.pc"]})
+            m.config_forced_sensor_entities({"forced_sensors": ["binary_sensor.f"]})
+            m.config_override_entities({"overrides": ["input_boolean.stop"]})
+            m.config_state_entities({})  # defaults to control entities
+        assert m._unsubs == unsubs
+
+    def test_stop_listener_is_tracked(self):
+        """A torn-down controller must not save stale state when HA stops later."""
+        m = _build_model()
+        stop_unsub = MagicMock()
+        m.hass.bus.async_listen_once = MagicMock(return_value=stop_unsub)
+        for name in (
+            "config_static_strings", "config_control_entities", "config_state_entities",
+            "config_sensor_entities", "config_hold_sensor_entities",
+            "config_forced_sensor_entities", "config_event_sensors",
+            "config_override_entities", "config_lux_constraint",
+            "config_transition_behaviours", "config_off_entities", "config_on_entities",
+            "config_normal_mode", "config_night_mode", "config_state_attributes_ignore",
+            "config_times", "config_other", "prepare_service_data",
+        ):
+            setattr(m, name, MagicMock())
+        m._async_restore_state = AsyncMock(return_value=True)
+        with patch("custom_components.entity_controller.Store"):
+            asyncio.run(m.startup_delay_callback(None))
+        assert stop_unsub in m._unsubs
+
+    def test_entity_teardown_stops_model_and_removes_entity(self):
+        from custom_components.entity_controller import EntityController
+        ec = EntityController.__new__(EntityController)
+        ec.may_update = True
+        ec.model = MagicMock()
+        ec.model.async_teardown = AsyncMock()
+        ec.hass = MagicMock()
+        ec.entity_id = "entity_controller.kitchen"
+        ec.async_remove = AsyncMock()
+
+        asyncio.run(ec.async_teardown())
+
+        assert ec.may_update is False
+        ec.model.async_teardown.assert_awaited_once()
+        ec.async_remove.assert_awaited_once()
+
+    def test_entity_teardown_before_added_to_hass(self):
+        """Reload during the first seconds: the entity may not have an entity_id yet."""
+        from custom_components.entity_controller import EntityController
+        ec = EntityController.__new__(EntityController)
+        ec.may_update = False
+        ec.model = MagicMock()
+        ec.model.async_teardown = AsyncMock()
+        ec.hass = None
+        ec.entity_id = None
+        ec.async_remove = AsyncMock()
+        asyncio.run(ec.async_teardown())
+        ec.model.async_teardown.assert_awaited_once()
+        ec.async_remove.assert_not_awaited()
+
+    def _reload_hass(self):
+        from custom_components.entity_controller.const import DOMAIN
+        hass = _make_hass()
+        old = MagicMock(name="old_controller")
+        old.async_teardown = AsyncMock()
+        component = MagicMock()
+        component.async_add_entities = AsyncMock()
+        hass.data = {DOMAIN: {"component": component, "machine": MagicMock(), "devices": [old]}}
+        return hass, old, component
+
+    def test_reload_keeps_controllers_when_yaml_invalid(self):
+        from custom_components.entity_controller import async_reload
+        hass, old, component = self._reload_hass()
+        with patch(
+            "custom_components.entity_controller.async_integration_yaml_config",
+            new=AsyncMock(return_value=None),
+        ):
+            result = asyncio.run(async_reload(hass))
+        assert result is False
+        old.async_teardown.assert_not_awaited()
+        component.async_add_entities.assert_not_awaited()
+        assert hass.data["entity_controller"]["devices"] == [old]
+
+    def test_reload_keeps_controllers_when_domain_missing(self):
+        from custom_components.entity_controller import async_reload
+        hass, old, component = self._reload_hass()
+        with patch(
+            "custom_components.entity_controller.async_integration_yaml_config",
+            new=AsyncMock(return_value={"light": []}),
+        ):
+            result = asyncio.run(async_reload(hass))
+        assert result is False
+        old.async_teardown.assert_not_awaited()
+
+    def test_reload_not_set_up(self):
+        from custom_components.entity_controller import async_reload
+        hass = _make_hass()
+        hass.data = {}
+        assert asyncio.run(async_reload(hass)) is False
+
+    def test_reload_tears_down_and_rebuilds(self):
+        from custom_components.entity_controller import async_reload, RELOAD_STARTUP_DELAY
+        from custom_components.entity_controller.const import DOMAIN
+        hass, old, component = self._reload_hass()
+        machine = hass.data[DOMAIN]["machine"]
+        new_conf = {DOMAIN: [{
+            "kitchen": {"sensors": ["binary_sensor.kitchen_pir"], "entities": ["light.kitchen"]},
+            "garage": {"sensors": ["binary_sensor.garage_door"], "entities": ["light.garage"]},
+        }]}
+        new_controller = MagicMock(name="new_controller")
+        with patch(
+            "custom_components.entity_controller.async_integration_yaml_config",
+            new=AsyncMock(return_value=new_conf),
+        ), patch(
+            "custom_components.entity_controller.EntityController",
+            return_value=new_controller,
+        ) as ctor:
+            result = asyncio.run(async_reload(hass))
+
+        assert result is True
+        old.async_teardown.assert_awaited_once()
+        assert ctor.call_count == 2
+        names = []
+        for call in ctor.call_args_list:
+            h, cfg, mach, delay = call.args
+            assert h is hass and mach is machine
+            assert delay == RELOAD_STARTUP_DELAY
+            names.append(cfg["name"])
+        assert names == ["kitchen", "garage"]
+        component.async_add_entities.assert_awaited_once_with([new_controller, new_controller])
+        assert hass.data[DOMAIN]["devices"] == [new_controller, new_controller]
+
+    def test_reload_survives_a_failing_teardown(self):
+        from custom_components.entity_controller import async_reload
+        from custom_components.entity_controller.const import DOMAIN
+        hass, old, component = self._reload_hass()
+        old.async_teardown = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch(
+            "custom_components.entity_controller.async_integration_yaml_config",
+            new=AsyncMock(return_value={DOMAIN: [{"kitchen": {"sensors": ["binary_sensor.a"], "entities": ["light.a"]}}]}),
+        ), patch("custom_components.entity_controller.EntityController", return_value=MagicMock()):
+            result = asyncio.run(async_reload(hass))
+        assert result is True
+        assert len(hass.data[DOMAIN]["devices"]) == 1
+
+    def test_setup_registers_reload_service(self):
+        from custom_components.entity_controller import async_setup
+        from custom_components.entity_controller.const import DOMAIN
+        hass = _make_hass()
+        hass.data = {}
+        create = AsyncMock(return_value=[])
+        with patch("custom_components.entity_controller.EntityComponent"), patch(
+            "custom_components.entity_controller._async_create_controllers", new=create
+        ):
+            assert asyncio.run(async_setup(hass, {DOMAIN: []})) is True
+        create.assert_awaited_once()
+        assert create.await_args.args[2] == 70  # STARTUP_DELAY for the real start
+        domains_services = [(c.args[0], c.args[1]) for c in hass.services.async_register.call_args_list]
+        assert (DOMAIN, "reload") in domains_services
+        assert set(hass.data[DOMAIN]) == {"component", "machine", "devices"}

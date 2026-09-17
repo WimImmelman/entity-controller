@@ -20,7 +20,7 @@ Entity controller component for Home Assistant.
 Maintainer:       Wim Immelman (this fork)
 Original author:  Daniel Mason (github.com/danobot/entity-controller)
 Fork lineage:     github.com/pluskal/entity-controller (2026 features and fixes)
-Version:          v9.12.2
+Version:          v9.13.0
 Project Page:     https://github.com/WimImmelman/entity-controller
 Documentation:    https://github.com/WimImmelman/entity-controller/blob/main/README.md
 """
@@ -54,7 +54,8 @@ from homeassistant.helpers.service import async_call_from_config
 
 DEPENDENCIES = ["light", "sensor", "binary_sensor", "cover", "fan", "media_player"]
 from homeassistant.helpers.storage import Store
-from homeassistant.const import EVENT_HOMEASSISTANT_STOP
+from homeassistant.helpers.reload import async_integration_yaml_config
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, SERVICE_RELOAD
 
 from .const import (
     DOMAIN,
@@ -136,15 +137,17 @@ from .entity_services import (
 
 
 
-VERSION = '9.12.2'
+VERSION = '9.13.0'
 
 
 _LOGGER = logging.getLogger(__name__)
 
 # Configure delay before starting to monitor state change events
 STARTUP_DELAY = 70
+# A reload happens on a running HA where every entity is already known, so the
+# rebuilt controllers only need a moment for their entities to be registered.
+RELOAD_STARTUP_DELAY = 1
 
-devices = []
 MODE_SCHEMA = vol.Schema(
     vol.All(
         {
@@ -242,6 +245,28 @@ async def async_setup(hass, config):
 
     async_setup_entity_services(component)
 
+    machine = _build_machine()
+
+    hass.data[DOMAIN] = {
+        "component": component,
+        "machine": machine,
+        "devices": [],
+    }
+
+    await _async_create_controllers(hass, config[DOMAIN], STARTUP_DELAY)
+
+    async def _async_handle_reload(call):
+        await async_reload(hass)
+
+    hass.services.async_register(DOMAIN, SERVICE_RELOAD, _async_handle_reload)
+
+    _LOGGER.info("The %s component is ready!", DOMAIN)
+
+    return True
+
+
+def _build_machine():
+    """Build the state machine shared by every controller instance."""
     machine = Machine(
         states=STATES,
         initial="pending",
@@ -469,24 +494,72 @@ async def async_setup(hass, config):
         dest="active",
     )
 
-    for myconfig in config[DOMAIN]:
+    return machine
+
+
+async def _async_create_controllers(hass, domain_config, startup_delay):
+    """Instantiate one EntityController per configured key and add them to HA.
+
+    ``domain_config`` is the validated ``config[DOMAIN]`` list. The new
+    controllers are appended to ``hass.data[DOMAIN]["devices"]`` so a later
+    reload can tear them down again.
+    """
+    data = hass.data[DOMAIN]
+    devices = []
+    for myconfig in domain_config:
         _LOGGER.info("Domain Configuration: " + str(myconfig))
-        for key, config in myconfig.items():
-            if not config:
-                config = {}
+        for key, item_config in myconfig.items():
+            if not item_config:
+                item_config = {}
 
-            # _LOGGER.info("Config Item %s: %s", str(key), str(config))
-            config["name"] = key
-            m = None
-            m = EntityController(hass, config, machine)
-            # machine.add_model(m.model)
-            # m.model.after_model(config)
-            devices.append(m)
+            item_config["name"] = key
+            devices.append(
+                EntityController(hass, item_config, data["machine"], startup_delay)
+            )
 
-    await component.async_add_entities(devices)
+    data["devices"].extend(devices)
+    await data["component"].async_add_entities(devices)
+    return devices
 
-    _LOGGER.info("The %s component is ready!", DOMAIN)
 
+async def async_reload(hass):
+    """Re-read the ``entity_controller:`` YAML and rebuild every controller.
+
+    Backs the ``entity_controller.reload`` service. The YAML is validated
+    first; if it is invalid the running controllers are left untouched and
+    the error is logged, exactly like the reload services of the core YAML
+    integrations. Otherwise each controller is torn down (listeners and
+    timers cancelled, state persisted, entity removed) and the set is rebuilt
+    from the new configuration with a short startup delay. The rebuilt
+    controllers restore their persisted state the same way they do after a
+    Home Assistant restart.
+
+    Returns True when the controllers were rebuilt.
+    """
+    data = hass.data.get(DOMAIN)
+    if data is None:
+        _LOGGER.error("reload :: %s is not set up", DOMAIN)
+        return False
+
+    conf = await async_integration_yaml_config(hass, DOMAIN)
+    if conf is None or DOMAIN not in conf:
+        _LOGGER.error(
+            "reload :: configuration for %s is invalid or missing, keeping the running controllers",
+            DOMAIN,
+        )
+        return False
+
+    old_devices = list(data["devices"])
+    _LOGGER.info("reload :: tearing down %d controller(s)", len(old_devices))
+    for device in old_devices:
+        try:
+            await device.async_teardown()
+        except Exception:  # noqa: BLE001 - one broken controller must not abort the reload
+            _LOGGER.exception("reload :: teardown of %s failed", device.name)
+    data["devices"] = []
+
+    new_devices = await _async_create_controllers(hass, conf[DOMAIN], RELOAD_STARTUP_DELAY)
+    _LOGGER.info("reload :: %d controller(s) rebuilt", len(new_devices))
     return True
 
 
@@ -500,7 +573,7 @@ class EntityController(entity.Entity):
         async_entity_service_set_night_mode as async_set_night_mode,
     )
 
-    def __init__(self, hass, config, machine):
+    def __init__(self, hass, config, machine, startup_delay=STARTUP_DELAY):
         self.attributes = {}
         self.may_update = False
         self.model = None
@@ -509,7 +582,7 @@ class EntityController(entity.Entity):
         if "friendly_name" in config:
             self.friendly_name = config.get("friendly_name")
         try:
-            self.model = Model(hass, config, machine, self)
+            self.model = Model(hass, config, machine, self, startup_delay)
         except AttributeError as e:
             _LOGGER.error(
                 "Configuration error! Please ensure you use plural keys for lists. e.g. sensors, entities." + e
@@ -594,6 +667,18 @@ class EntityController(entity.Entity):
         """Register update dispatcher."""
         self.may_update = True
 
+    async def async_teardown(self):
+        """Detach the controller from HA (used by the reload service).
+
+        Stops the model (listeners, timers, persisted state) and removes the
+        entity, so a rebuilt controller can take over the same entity id.
+        """
+        self.may_update = False
+        if self.model is not None:
+            await self.model.async_teardown()
+        if self.hass is not None and self.entity_id is not None:
+            await self.async_remove()
+
     @property
     def should_poll(self) -> bool:
         """EntityController will push its state to HA"""
@@ -602,11 +687,19 @@ class EntityController(entity.Entity):
 class Model:
     """ Represents the transitions state machine model """
 
-    def __init__(self, hass, config, machine, entity):
+    def __init__(self, hass, config, machine, entity, startup_delay=STARTUP_DELAY):
         self.ec_startup_time = datetime.now()
 
         self.hass = hass  # backwards reference to hass object
         self.entity = entity  # backwards reference to entity containing this model
+        self._machine = machine  # kept so a reload can detach this model again
+        # Cancel callables of every HA listener this model registered. A reload
+        # calls them all in async_teardown(); without that the old controller
+        # would keep reacting to sensors next to its replacement.
+        self._unsubs = []
+        self._torn_down = False
+        self.start_time_event_hook = None
+        self.end_time_event_hook = None
 
         self.config = (
             {}
@@ -677,9 +770,63 @@ class Model:
             self
         )  # add here because machine generated methods are being used in methods below.
 
-        event.async_call_later(self.hass, STARTUP_DELAY, self.startup_delay_callback)
+        self._track(event.async_call_later(self.hass, startup_delay, self.startup_delay_callback))
+
+    # =====================================================
+    # L I F E C Y C L E   (reload support)
+    # =====================================================
+
+    def _track(self, unsub):
+        """Remember a listener cancel callable so async_teardown() can call it."""
+        if getattr(self, "_unsubs", None) is None:
+            self._unsubs = []
+        if callable(unsub):
+            self._unsubs.append(unsub)
+        return unsub
+
+    async def async_teardown(self):
+        """Stop this model for good: cancel listeners and timers, persist state.
+
+        Called by the reload service before the controller is rebuilt from the
+        new YAML. The state is saved first so the replacement restores it the
+        same way it would after a Home Assistant restart. Timers are cancelled
+        afterwards; the callbacks also check ``_torn_down`` because a
+        ``threading.Timer`` that already fired cannot be cancelled any more.
+        """
+        self.log.debug("async_teardown :: Tearing down")
+        self._torn_down = True
+        if self._store is not None:
+            try:
+                await self._async_save_state()
+            except Exception:  # noqa: BLE001 - never let a save failure block the teardown
+                self.log.exception("async_teardown :: Failed to persist state")
+        for unsub in getattr(self, "_unsubs", []):
+            try:
+                unsub()
+            except Exception:  # noqa: BLE001
+                self.log.exception("async_teardown :: Failed to cancel a listener")
+        self._unsubs = []
+        for cancel in self._event_sensor_cancel_callbacks:
+            cancel()
+        self._event_sensor_cancel_callbacks = []
+        for hook_name in ("start_time_event_hook", "end_time_event_hook", "_lux_recheck_handle"):
+            hook = getattr(self, hook_name, None)
+            if callable(hook):
+                hook()
+            setattr(self, hook_name, None)
+        self._cancel_timer()
+        if self.block_timer_handle is not None and self.block_timer_handle.is_alive():
+            self.block_timer_handle.cancel()
+        machine = getattr(self, "_machine", None)
+        if machine is not None:
+            try:
+                machine.remove_model(self)
+            except ValueError:
+                pass  # already detached
 
     async def startup_delay_callback(self, evt):
+        if self._torn_down:
+            return
         config = self.config
         self.config_static_strings(config)
         self.config_control_entities(config)
@@ -706,7 +853,9 @@ class Model:
 
         # Phase 2: Set up state persistence store and register shutdown handler
         self._store = Store(self.hass, STORAGE_VERSION, self._storage_key())
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_save_state)
+        # Tracked so a torn-down controller does not overwrite its
+        # replacement's persisted state when HA stops later.
+        self._track(self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._async_save_state))
 
         # Phase 2: Attempt to restore persisted state before the first transition
         restored = await self._async_restore_state()
@@ -1159,6 +1308,8 @@ class Model:
         return True
 
     def timer_expire(self):
+        if self._torn_down:
+            return  # a reload replaced this controller while the timer thread was already running
         self.log.debug("timer_expire :: Timer expired")
         if self.graceful_pending:
             # Graceful off: we left active_timer for overridden/constrained but kept the timer.
@@ -1182,6 +1333,8 @@ class Model:
             self.timer_expires()
 
     def block_timer_expire(self):
+        if self._torn_down:
+            return
         self.log.debug("block_timer_expire :: Blocked Timer expired")
         self.block_timer_expires()
 
@@ -1570,9 +1723,9 @@ class Model:
             self.log.info(
                 "State Entities (explicitly defined - I hope you know what you are doing): " + str(self.stateEntities)
             )
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.stateEntities, self.state_entity_state_change
-            )
+            ))
 
         if len(self.stateEntities) == 0:
             # If no state entities are defined, use control entites as state
@@ -1580,9 +1733,9 @@ class Model:
             self.log.debug(
                 "Added Control Entities as state entities (default): " + str(self.stateEntities)
             )
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.stateEntities, self.state_entity_state_change
-            )
+            ))
 
     def config_off_entities(self, config):
 
@@ -1611,9 +1764,9 @@ class Model:
         self.log.debug("Sensor Entities: " +  pprint.pformat(self.sensorEntities))
 
         if self.sensorEntities:
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.sensorEntities, self.sensor_state_change
-            )
+            ))
 
     def config_hold_sensor_entities(self, config):
         """Sensors that never switch the light on, but keep it on.
@@ -1629,9 +1782,9 @@ class Model:
         self.add(self.holdSensorEntities, config, CONF_HOLD_SENSORS)
         if self.holdSensorEntities:
             self.log.debug("Hold Sensor Entities: %s", pprint.pformat(self.holdSensorEntities))
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.holdSensorEntities, self.hold_sensor_state_change
-            )
+            ))
 
     def config_forced_sensor_entities(self, config):
         """Phase 3: Configure forced sensors that bypass blocked/constrained/overridden.
@@ -1644,9 +1797,9 @@ class Model:
         self.add(self.forcedSensorEntities, config, CONF_FORCED_SENSORS)
         if self.forcedSensorEntities:
             self.log.debug("Forced Sensor Entities: %s", pprint.pformat(self.forcedSensorEntities))
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.forcedSensorEntities, self.forced_sensor_state_change
-            )
+            ))
 
     def config_event_sensors(self, config):
         """Phase 6: Configure HA bus event sensors.
@@ -1757,9 +1910,9 @@ class Model:
                     ]
                     if new_watch:
                         self.stateEntities.extend(new_watch)
-                        event.async_track_state_change_event(
+                        self._track(event.async_track_state_change_event(
                             self.hass, new_watch, self.state_entity_state_change
-                        )
+                        ))
                         self.log.debug(
                             "Added night control entities as state entities: %s",
                             str(new_watch),
@@ -1838,7 +1991,7 @@ class Model:
                 self.log.debug(
                     "Constrain period active. Scheduling transition to 'constrained'"
                 )
-                event.async_call_later(self.hass, 1, self.constrain_entity)
+                self._track(event.async_call_later(self.hass, 1, self.constrain_entity))
 
         self.log_config()
 
@@ -1852,9 +2005,9 @@ class Model:
 
         if len(self.overrideEntities) > 0:
             self.log.debug("Override Entities: " +  pprint.pformat(self.overrideEntities))
-            event.async_track_state_change_event(
+            self._track(event.async_track_state_change_event(
                 self.hass, self.overrideEntities, self.override_state_change
-            )
+            ))
 
     def config_lux_constraint(self, config):
         """Configure the optional illuminance (lux) activation constraint.
@@ -2021,7 +2174,7 @@ class Model:
                 "_async_restore_state :: Graceful-off timer from before restart has %.0f s left, scheduling turn-off",
                 remaining)
             self.update(notes="Graceful-off timer from before restart: %.0f s left" % remaining)
-            event.async_call_later(self.hass, max(remaining, 1), self._restore_timer_finish)
+            self._track(event.async_call_later(self.hass, max(remaining, 1), self._restore_timer_finish))
 
         if saved_state == "overridden":
             # Only restore overridden if an override entity is actually on, so
@@ -2064,7 +2217,7 @@ class Model:
                 self.log.info(
                     "_async_restore_state :: Controlled entity is not available yet, "
                     "deferring the run-out decision (expiry %s)", expiry)
-                event.async_call_later(self.hass, 30, self._restore_timer_finish)
+                self._track(event.async_call_later(self.hass, 30, self._restore_timer_finish))
                 return False
             if not self.is_state_entities_on():
                 # The light was turned off meanwhile (manually or by another
@@ -2095,7 +2248,7 @@ class Model:
                 "_async_restore_state :: Timer from before restart has %.0f s left, scheduling turn-off",
                 remaining)
             self.update(notes="Timer from before restart: %.0f s left" % remaining)
-            event.async_call_later(self.hass, remaining, self._restore_timer_finish)
+            self._track(event.async_call_later(self.hass, remaining, self._restore_timer_finish))
             return False
 
         # For all other states (idle, constrained, etc.) let the normal startup
@@ -2112,7 +2265,7 @@ class Model:
         over control (active_timer / overridden), we do not interfere.
         """
         expiry = self._pending_restore_expiry
-        if expiry is None:
+        if expiry is None or self._torn_down:
             return
         if self.is_active_timer() or (self.is_overridden() and not self._pending_restore_is_graceful):
             # A graceful-off run-out is expected to finish *inside* overridden, so in
@@ -2133,7 +2286,7 @@ class Model:
                 self.log.debug(
                     "_restore_timer_finish :: Controlled entity is unavailable, retrying in 30 s (%d/10)",
                     self._restore_retries)
-                event.async_call_later(self.hass, 30, self._restore_timer_finish)
+                self._track(event.async_call_later(self.hass, 30, self._restore_timer_finish))
             else:
                 self._pending_restore_expiry = None
                 self._pending_restore_is_graceful = False
@@ -2153,7 +2306,7 @@ class Model:
         if remaining > 1:
             self.log.debug(
                 "_restore_timer_finish :: Entity is back, timer has %.0f s left", remaining)
-            event.async_call_later(self.hass, remaining, self._restore_timer_finish)
+            self._track(event.async_call_later(self.hass, remaining, self._restore_timer_finish))
             return
         self._pending_restore_expiry = None
         self._pending_restore_is_graceful = False

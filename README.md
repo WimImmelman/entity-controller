@@ -21,7 +21,7 @@ motion_light:
 ## Lineage
 - **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024).
 - **[pluskal](https://github.com/pluskal/entity-controller)** added, in 2026, state persistence with timer run-out across restarts, forced/event/hold sensors, the lux constraint, entity-driven night mode, `grace_period`, and a series of state-machine fixes (v9.8.0 to v9.11.1).
-- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0) and repository housekeeping.
+- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0), the `entity_controller.reload` service (v9.13.0) and repository housekeeping.
 
 Licensed under the GPL-3.0, as the original. See [COPYING](COPYING).
 
@@ -179,6 +179,25 @@ entity_controller:
 
 **When to use it:** Only needed for integrations where state-change events arrive with a context unrelated to the original EC service call (cloud integrations, gateway bridges, etc.). Standard local integrations — where HA propagates the service-call context through to the state-change event — are handled correctly by the existing context check and do not need this option.
 
+
+## Reload service (`entity_controller.reload`)
+
+**Problem:** Entity Controller is configured in YAML, and every change to a controller (a new sensor, a different `delay`, a time window) needed a full Home Assistant restart before it took effect. Restarts disturb every other integration and make tuning a controller a slow loop.
+
+**Solution:** The `entity_controller.reload` service re-reads the `entity_controller:` YAML and rebuilds the controllers in place. It works like the reload services of the core YAML integrations:
+
+1. The YAML is validated first. If it is invalid, the error is logged and the running controllers are left untouched.
+2. Every existing controller is torn down: all its listeners and timers are cancelled, its state is persisted, and its entity is removed.
+3. The controllers are rebuilt from the new configuration. They start monitoring after about a second instead of the 70 s startup delay used at boot, and they restore their persisted state the same way they do after a Home Assistant restart.
+
+Controllers that were removed from the YAML disappear, new ones appear, and renamed ones are treated as removed plus new. Because a reload goes through the same restore path as a restart, a controller that was in `active_timer` re-evaluates its light like it would after a restart (the light is switched off when the controller settles in `idle`); pick a quiet moment for reloads if that matters.
+
+```yaml
+# Developer tools -> Actions, or from an automation/script:
+action: entity_controller.reload
+```
+
+Code changes to the component itself still need a Home Assistant restart; the reload only re-reads the configuration.
 
 ## Graceful Off (`graceful_off`)
 
