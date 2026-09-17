@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.13.0"></a>
+## [9.13.0](https://github.com/WimImmelman/entity-controller/compare/v9.12.2...v9.13.0) (2026-09-17)
+
+
+### Features
+
+* **`entity_controller.reload` service** – Re-read the `entity_controller:` YAML and rebuild every controller without restarting Home Assistant. The YAML is validated first (`async_integration_yaml_config`); invalid configuration is logged and the running controllers are kept, as the core YAML integrations do. Otherwise each controller is torn down and the set is rebuilt from the new configuration with a 1 s startup delay instead of the 70 s boot delay. To make teardown possible, `Model` now records the cancel callable of every listener it registers (`_track()`: sensor, hold, forced, override and state-entity trackers, night-mode state entities, the startup/constrain/restore `async_call_later` handles, the bus event-sensor subscriptions and the `EVENT_HOMEASSISTANT_STOP` save hook) and `Model.async_teardown()` persists the state, cancels the listeners, the start/end point-in-time hooks, the lux re-check, the off-timer and the block timer, and detaches the model from the shared state machine. `EntityController.async_teardown()` then removes the entity so the rebuilt controller can take over its entity id. Callbacks that can still fire after teardown (`timer_expire`, `block_timer_expire`, `_restore_timer_finish`, `startup_delay_callback`) return early for a torn-down model. The rebuilt controllers restore their persisted state through the existing persistence layer, so a reload behaves like a restart from the controllers' point of view. `async_setup` is split into `_build_machine()`, `_async_create_controllers()` and `async_reload()`; the module-level `devices` list moved into `hass.data[DOMAIN]`.
+
+### Tests
+
+* `TestReloadService` (17 tests): `_track` collects cancel callables; teardown cancels tracked listeners, event-sensor subscriptions, start/end hooks, lux re-check, off- and block timers and detaches the model; teardown persists state first and copes without a store and with a repeated call; timer, block-timer, restore and startup callbacks are no-ops after teardown; the listener-registering `config_*` methods and the HA-stop save hook are tracked; `EntityController.async_teardown` stops the model and removes the entity (also before an entity id exists); `async_reload` keeps the controllers when the YAML is invalid or the domain is missing, reports not-set-up, tears down and rebuilds with `RELOAD_STARTUP_DELAY` and the configured names, survives a failing teardown; `async_setup` registers `entity_controller.reload` and populates `hass.data`.
+
 <a name="9.12.2"></a>
 ## [9.12.2](https://github.com/WimImmelman/entity-controller/compare/v9.12.1...v9.12.2) (2026-09-17)
 
