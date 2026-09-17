@@ -278,6 +278,13 @@ def _build_model(hass=None, entity=None, config=None):
         m.block_timeout = None
         m.grace_period = None
         m.ignore_state_changes_until = datetime.now()
+        m.graceful_off = False
+        m.graceful_candidate = False
+        m.graceful_pending = False
+        m._expiry_time = None
+        m._pending_restore_expiry = None
+        m._pending_restore_is_graceful = False
+        m._restore_retries = 0
         m.homeassistant_turn_on_domains = ["group"]
 
         DEFAULT_ON = ["on", "playing", "home", "True"]
@@ -745,8 +752,13 @@ class TestStatePersistence:
     def test_on_enter_overridden_schedules_save(self):
         model = _build_model()
         model._store = MagicMock()
-        model.override()
-        model.hass.async_create_task.assert_called()
+        with patch(
+            "custom_components.entity_controller.asyncio.run_coroutine_threadsafe"
+        ) as schedule:
+            model.override()
+            schedule.assert_called()
+            for call in schedule.call_args_list:
+                call.args[0].close()
 
     def test_on_enter_blocked_schedules_save(self):
         model = _build_model()
@@ -1734,3 +1746,266 @@ class TestNightModeEntity:
         from custom_components.entity_controller import MODE_SCHEMA
         with pytest.raises(vol.Invalid):
             MODE_SCHEMA({"delay": 60})
+
+
+# ---------------------------------------------------------------------------
+# graceful_off — keep the timer through overridden/constrained, switch off on expiry
+# ---------------------------------------------------------------------------
+
+def _graceful_model(sensor_type="duration"):
+    """Model with graceful_off enabled and a fake live timer thread.
+
+    _start_timer/_cancel_timer are mocked by _build_model; graceful_off only needs
+    ``timer_handle.is_alive()`` to answer truthfully, so a MagicMock handle is used
+    and flipped to dead by the test where the real Timer would have fired.
+    """
+    m = _build_model()
+    m.graceful_off = True
+    m.sensor_type = sensor_type
+    m.stateEntities = ["light.test"]
+    m.controlEntities = ["light.test"]
+    m.turn_off_control_entities = MagicMock()
+    m.turn_on_control_entities = MagicMock()
+    m.entity.attributes = {}
+    m.entity.set_attr = lambda k, v: m.entity.attributes.__setitem__(k, v)  # real set_attr semantics
+    m._light = "off"
+    m._sensor = "off"
+
+    def _get(eid):
+        st = MagicMock()
+        st.state = m._light if eid == "light.test" else m._sensor
+        return st
+    m.hass.states.get = MagicMock(side_effect=_get)
+
+    def _start():
+        m.timer_handle = MagicMock()
+        m.timer_handle.is_alive = MagicMock(return_value=True)
+        m._expiry_time = datetime.now()
+        m.entity.attributes["expires_at"] = m._expiry_time
+    m._start_timer = MagicMock(side_effect=_start)
+
+    def _cancel():
+        if m.timer_handle is not None:
+            m.timer_handle.is_alive = MagicMock(return_value=False)
+    m._cancel_timer = MagicMock(side_effect=_cancel)
+    return m
+
+
+def _fire_timer(m):
+    """Simulate the threading.Timer callback firing."""
+    m.timer_handle.is_alive = MagicMock(return_value=False)
+    m.timer_expire()
+
+
+class TestGracefulOff:
+
+    def test_override_mid_timer_keeps_timer_and_turns_off_on_expiry(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        assert m.state == "active_timer"
+        m._sensor = "off"
+        m.override()
+        assert m.state == "overridden"
+        assert m.graceful_pending is True
+        assert m.timer_handle.is_alive() is True
+        assert "graceful_off_expires_at" in m.entity.attributes
+        m.turn_off_control_entities.assert_not_called()
+        _fire_timer(m)
+        m.turn_off_control_entities.assert_called_once()
+        assert m.state == "overridden"
+        assert m.graceful_pending is False
+        assert "graceful_off_expires_at" not in m.entity.attributes
+        assert "graceful_off_at" in m.entity.attributes
+
+    def test_constrain_mid_timer_keeps_timer_and_turns_off_on_expiry(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.constrain()
+        assert m.state == "constrained"
+        assert m.graceful_pending is True
+        # duration sensor still on is ignored: the light goes off at the original expiry
+        _fire_timer(m)
+        m.turn_off_control_entities.assert_called_once()
+        assert m.state == "constrained"
+
+    def test_new_trigger_during_grace_is_ignored(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.override()
+        evt = MagicMock()
+        evt.data = {"entity_id": "binary_sensor.motion",
+                    "old_state": MagicMock(state="off"), "new_state": MagicMock(state="on")}
+        m.sensor_state_change(evt)
+        assert m.state == "overridden"
+        assert m.graceful_pending is True
+        m.turn_off_control_entities.assert_not_called()
+
+    def test_expiry_does_nothing_when_light_already_off(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.override()
+        m._light = "off"  # switched off by hand during the grace window
+        _fire_timer(m)
+        m.turn_off_control_entities.assert_not_called()
+        assert m.graceful_pending is False
+        assert "graceful_off_at" in m.entity.attributes
+
+    def test_blocked_cancels_graceful_timer(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.control()  # state entity changed by someone else while on -> blocked
+        assert m.state == "blocked"
+        assert m.graceful_candidate is False
+        assert m.graceful_pending is False
+        assert m.timer_handle.is_alive() is False
+
+    def test_manual_off_mid_timer_goes_idle_and_cancels(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "off"
+        m.control()
+        assert m.state == "idle"
+        assert m.graceful_candidate is False
+        assert m.timer_handle.is_alive() is False
+
+    def test_override_release_into_active_cancels_graceful_and_restarts_timer(self):
+        m = _graceful_model()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.override()
+        old = m.timer_handle
+        assert m._start_timer.call_count == 1
+        m.enable()  # state entities on + sensor on -> active
+        assert m.state == "active_timer"
+        assert m.graceful_pending is False
+        assert old.is_alive() is False
+        assert m._start_timer.call_count == 2
+
+    def test_override_from_idle_does_not_arm(self):
+        m = _graceful_model()
+        m.override()
+        assert m.state == "overridden"
+        assert m.graceful_pending is False
+        assert m.timer_handle is None
+
+    def test_flag_off_keeps_stock_behaviour(self):
+        m = _graceful_model()
+        m.graceful_off = False
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.override()
+        assert m.graceful_candidate is False
+        assert m.graceful_pending is False
+        assert m.timer_handle.is_alive() is False
+        m.turn_off_control_entities.assert_not_called()
+
+    def test_timer_expire_in_active_timer_unaffected(self):
+        m = _graceful_model(sensor_type="event")
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        _fire_timer(m)
+        assert m.state == "idle"
+        assert m.graceful_pending is False
+
+    def test_config_other_reads_flag(self):
+        from custom_components.entity_controller.const import CONF_GRACEFUL_OFF
+        m = _build_model(config={"name": "t", "entity": "light.test",
+                                 "sensor": "binary_sensor.motion", CONF_GRACEFUL_OFF: True})
+        m.entity.set_attr = MagicMock()
+        m.config_other(m.config)
+        assert m.graceful_off is True
+        m2 = _build_model()
+        m2.config_other(m2.config)
+        assert m2.graceful_off is False
+
+    # -- persistence across HA restart ------------------------------------
+
+    def test_save_state_includes_graceful_expiry_only_when_pending(self):
+        m = _graceful_model()
+        m._store = MagicMock()
+        m._store.async_save = AsyncMock()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        asyncio.run(m._async_save_state())
+        assert m._store.async_save.call_args.args[0]["graceful_expires_at"] is None
+        m.override()
+        asyncio.run(m._async_save_state())
+        data = m._store.async_save.call_args.args[0]
+        assert data["state"] == "overridden"
+        assert data["graceful_expires_at"] == str(m._expiry_time)
+
+    def test_arming_graceful_persists_state(self):
+        m = _graceful_model()
+        m._schedule_save_state = MagicMock()
+        m._sensor = "on"
+        m.sensor_on()
+        m._light = "on"
+        m.constrain()  # pluskal does not save on constrained; graceful_off must
+        m._schedule_save_state.assert_called()
+
+    def test_restore_schedules_graceful_run_out(self):
+        m = _graceful_model()
+        m._store = MagicMock()
+        future = datetime.now().replace(microsecond=0)
+        from datetime import timedelta
+        future = future + timedelta(seconds=120)
+        m._store.async_load = AsyncMock(return_value={
+            "state": "constrained", "saved_at": "x",
+            "expires_at": None, "graceful_expires_at": str(future)})
+        with patch("custom_components.entity_controller.event.async_call_later") as later:
+            restored = asyncio.run(m._async_restore_state())
+        assert restored is False  # normal startup evaluation still runs
+        assert m._pending_restore_expiry == future
+        assert m._pending_restore_is_graceful is True
+        later.assert_called_once()
+        delay = later.call_args.args[1]
+        assert 100 < delay <= 120
+
+    def test_restore_ignores_graceful_expiry_for_other_states(self):
+        m = _graceful_model()
+        m._store = MagicMock()
+        m._store.async_load = AsyncMock(return_value={
+            "state": "idle", "saved_at": "x",
+            "expires_at": None, "graceful_expires_at": str(datetime.now())})
+        with patch("custom_components.entity_controller.event.async_call_later") as later:
+            asyncio.run(m._async_restore_state())
+        later.assert_not_called()
+        assert m._pending_restore_is_graceful is False
+
+    def test_restore_timer_finish_turns_off_inside_overridden_when_graceful(self):
+        m = _graceful_model()
+        m.override()  # restored into overridden
+        m._light = "on"
+        from datetime import timedelta
+        m._pending_restore_expiry = datetime.now() - timedelta(seconds=5)
+        m._pending_restore_is_graceful = True
+        m._restore_timer_finish()
+        m.turn_off_control_entities.assert_called_once()
+        assert m._pending_restore_expiry is None
+        assert m._pending_restore_is_graceful is False
+
+    def test_restore_timer_finish_still_defers_to_overridden_for_plain_run_out(self):
+        m = _graceful_model()
+        m.override()
+        m._light = "on"
+        from datetime import timedelta
+        m._pending_restore_expiry = datetime.now() - timedelta(seconds=5)
+        m._pending_restore_is_graceful = False
+        m._restore_timer_finish()
+        m.turn_off_control_entities.assert_not_called()
+        assert m._pending_restore_expiry is None
