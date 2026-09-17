@@ -1931,6 +1931,20 @@ class TestGracefulOff:
         m2.config_other(m2.config)
         assert m2.graceful_off is False
 
+    def test_graceful_off_attribute_survives_idle_reset(self):
+        """reset_state() wipes non-persisted attributes on entering idle; the config
+        echo must stay so the flag is visible while the controller is idle."""
+        from custom_components.entity_controller import EntityController
+        ec = EntityController.__new__(EntityController)
+        ec.may_update = False
+        ec.attributes = {"graceful_off": True, "graceful_off_at": "2026-09-17 20:18:57",
+                         "graceful_off_expires_at": "x", "delay": "1200s", "expires_at": "y"}
+        ec.reset_state()
+        assert ec.attributes["graceful_off"] is True
+        assert ec.attributes["delay"] == "1200s"
+        for gone in ("graceful_off_at", "graceful_off_expires_at", "expires_at"):
+            assert gone not in ec.attributes
+
     # -- persistence across HA restart ------------------------------------
 
     def test_save_state_includes_graceful_expiry_only_when_pending(self):

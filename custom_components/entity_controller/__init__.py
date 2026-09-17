@@ -568,6 +568,7 @@ class EntityController(entity.Entity):
             "lux_entity",
             "lux_threshold",
             "lux_bright_states",
+            CONF_GRACEFUL_OFF,  # config echo, must survive the idle reset like the other config keys
         ]
         for k, v in self.attributes.items():
             if k in PERSISTED_STATE_ATTRIBUTES:
