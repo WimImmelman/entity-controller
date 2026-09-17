@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.12.1"></a>
+## [9.12.1](https://github.com/WimImmelman/entity-controller/compare/v9.12.0...v9.12.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **fork identity** – `manifest.json` `documentation` and `codeowners` pointed at the original danobot repository and `issue_tracker` was missing, so HACS and the HA integration page sent users to the wrong place. Now `documentation`/`issue_tracker` point at this fork and `codeowners` is `@WimImmelman`; the non-standard `homeassistant` key is dropped from the manifest (HA ignores it; the minimum HA version lives in `hacs.json`, where HACS reads it). The module header, `VERSION` constant (stuck at 9.8.0 since the pluskal fork) and `package.json` are synced to the manifest version; README and `info.md` replace the original author's donation badges and blog links with a lineage section crediting Daniel Mason (original author) and pluskal (2026 fork features); the agent instructions use this repository's compare URL and default branch.
+* **stale documentation** – Remove `diagram.puml` (hand-drawn 2020 PlantUML of the state machine, out of date since 9.8.0), the `images/` GIFs and diagrams that only the original author's external docs site referenced, and the demo-video section in README/`info.md`. Remove the `draw`, `image_prefix` and `image_path` config keys from `config_other()` (read into attributes nothing ever used) and the undocumented `day_length` debug key that let `futurize()` treat a day as N seconds. Drop the remaining links to the original author's documentation site and blog.
+
 <a name="9.12.0"></a>
 ## [9.12.0](https://github.com/WimImmelman/entity-controller/compare/v9.11.1...v9.12.0) (2026-09-17)
 

@@ -20,7 +20,7 @@ Entity controller component for Home Assistant.
 Maintainer:       Wim Immelman (this fork)
 Original author:  Daniel Mason (github.com/danobot/entity-controller)
 Fork lineage:     github.com/pluskal/entity-controller (2026 features and fixes)
-Version:          v9.7.6
+Version:          v9.12.1
 Project Page:     https://github.com/WimImmelman/entity-controller
 Documentation:    https://github.com/WimImmelman/entity-controller/blob/main/README.md
 """
@@ -136,7 +136,7 @@ from .entity_services import (
 
 
 
-VERSION = '9.8.0'
+VERSION = '9.12.1'
 
 
 _LOGGER = logging.getLogger(__name__)
