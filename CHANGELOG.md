@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.12.0"></a>
+## [9.12.0](https://github.com/WimImmelman/entity-controller/compare/v9.11.1...v9.12.0) (2026-09-17)
+
+
+### Features
+
+* **graceful_off** – New per-controller option `graceful_off` (default `false`, stock behaviour). When a controller in `active_timer` is pushed into `overridden` (an override entity turns on) or `constrained` (`end_time` reached), EC cancels the off-timer in `on_exit_active` and the entry behaviours of both states default to `ignore`, so a light EC switched on stays on until somebody notices. With `graceful_off: true` the running timer is kept alive instead: when it expires the control entities are switched off (only if still on, without a state transition, attribute `graceful_off_at` stamped) and the light goes off exactly when it would have anyway. New sensor triggers during that window are ignored, as they already are in those states. Entering `idle`, `blocked` or `active` cancels the kept timer, so a light someone re-toggled by hand (`blocked`) is left alone and an override released back into `active` starts a fresh timer as before. Attribute `graceful_off_expires_at` shows the pending run-out. Motivating install: 18 `active_timer → constrained` cut-offs in 7 days, all outdoor controllers ending at sunrise plus a night lamp in no light group that then burned until 14:14; the household had been papering over it with "all lights off after sunrise" automations. Chosen over `behaviours: on_enter_overridden: 'off'`, which also fires from `pending` (every daytime HA restart would switch the room off) and from `blocked` (kills a manually switched-on light).
+* **graceful_off survives restarts** – `_async_save_state` now also stores `graceful_expires_at` while a graceful run-out is pending, and the state is saved when the timer is armed or cancelled (this covers `constrained`, a state the persistence layer never saved on). On restore, a pending run-out saved in `overridden`/`constrained` is finished through `_restore_timer_finish`, which for this case no longer treats `overridden` as "EC has taken over"; a plain `active_timer` run-out keeps the old rule.
+
+### Tests
+
+* `TestGracefulOff` (17 tests): override and constraint mid-timer keep the timer and switch off on expiry (duration sensor still on is ignored), new triggers during the grace window are ignored, expiry is a no-op when the light was switched off by hand, `blocked` and manual-off cancel the kept timer, release back into `active` cancels it and restarts the timer, override from `idle` does not arm, flag off keeps stock behaviour, normal `active_timer` expiry unaffected, `config_other` reads the flag; persistence: `graceful_expires_at` saved only while pending, arming persists state, restore schedules the run-out for `overridden`/`constrained` only, `_restore_timer_finish` turns off inside `overridden` for a graceful run-out but still defers for a plain one.
+* `TestStatePersistence.test_on_enter_overridden_schedules_save` updated to the thread-safe `run_coroutine_threadsafe` path introduced in 9.8.3 (it still asserted the pre-9.8.3 `hass.async_create_task`).
+
 <a name="9.11.1"></a>
 ## [9.11.1](https://github.com/pluskal/entity-controller/compare/v9.11.0...v9.11.1) (2026-09-04)
 
