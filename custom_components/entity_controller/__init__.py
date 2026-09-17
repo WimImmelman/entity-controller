@@ -106,6 +106,7 @@ from .const import (
     CONF_NIGHT_MODE_ENTITIES,
     CONF_STATE_ATTRIBUTES_IGNORE,
     CONF_IGNORED_EVENT_SOURCES,
+    CONF_GRACEFUL_OFF,
     CONSTRAIN_START,
     CONSTRAIN_END,
 
@@ -191,6 +192,7 @@ ENTITY_SCHEMA = vol.Schema(
         vol.Optional(CONF_STATE_ENTITIES, default=[]): cv.entity_ids,
         vol.Optional(CONF_BLOCK_TIMEOUT, default=None): cv.positive_int,
         vol.Optional(CONF_DISABLE_BLOCK, default=False): cv.boolean,
+        vol.Optional(CONF_GRACEFUL_OFF, default=False): cv.boolean,
         vol.Optional(CONF_IGNORE_STATE_CHANGES_UNTIL, default=None): vol.Any(None, cv.positive_int),
         vol.Optional(CONF_NIGHT_MODE, default=None): MODE_SCHEMA,
         vol.Optional(CONF_STATE_ATTRIBUTES_IGNORE, default=[]): cv.ensure_list,
@@ -620,7 +622,12 @@ class Model:
         self._expiry_time = None   # kdy ma dobehnout timer (pro obnovu po restartu)
         self._pending_restore_expiry = None  # timer run-out carried over a restart
         self._restore_retries = 0            # kolikrat jsme cekali na nedostupnou entitu
+        self._pending_restore_is_graceful = False  # the carried-over run-out is a graceful-off timer
         self.block_timer_handle = None
+        # graceful_off support (see CONF_GRACEFUL_OFF)
+        self.graceful_off = False
+        self.graceful_candidate = False  # timer was kept alive on exit from active, awaiting destination state
+        self.graceful_pending = False    # timer is running while in overridden/constrained
         self.sensor_type = None
         self.night_mode = None
         self.state_attributes_ignore = []
@@ -1111,8 +1118,32 @@ class Model:
         self.update(expires_at=expiry_time)
 
     def _cancel_timer(self):
-        if self.timer_handle.is_alive():
+        if self.timer_handle is not None and self.timer_handle.is_alive():
             self.timer_handle.cancel()
+
+    def _arm_graceful_timer(self):
+        """ Called on entering overridden/constrained. If the active timer was kept alive
+            when leaving active_timer, let it run to completion so the control entities
+            are still switched off after the configured delay. """
+        if self.graceful_candidate:
+            self.graceful_candidate = False
+            if self.timer_handle is not None and self.timer_handle.is_alive():
+                self.graceful_pending = True
+                self.log.info("_arm_graceful_timer :: Keeping timer alive in %s; control entities will be turned off at %s",
+                              self.state, self.entity.attributes.get("expires_at"))
+                self.update(graceful_off_expires_at=self.entity.attributes.get("expires_at"))
+                self._schedule_save_state()  # so the run-out survives an HA restart
+
+    def _cancel_graceful_timer(self):
+        """ Called on entering idle/blocked/active. Any timer kept alive for a graceful off
+            is no longer wanted in these states. """
+        if self.graceful_candidate or self.graceful_pending:
+            self.log.debug("_cancel_graceful_timer :: Cancelling graceful off timer")
+            self.graceful_candidate = False
+            self.graceful_pending = False
+            self._cancel_timer()
+            self.entity.attributes.pop("graceful_off_expires_at", None)
+            self._schedule_save_state()
 
     def _reset_timer(self):
         self.log.debug("_reset_timer :: Resetting timer: " + str(self.backoff))
@@ -1127,6 +1158,21 @@ class Model:
 
     def timer_expire(self):
         self.log.debug("timer_expire :: Timer expired")
+        if self.graceful_pending:
+            # Graceful off: we left active_timer for overridden/constrained but kept the timer.
+            # Turn the control entities off now (no state transition, sensors are ignored).
+            self.graceful_pending = False
+            self.entity.attributes.pop("graceful_off_expires_at", None)
+            if not (self.is_overridden() or self.is_constrained()):
+                self.log.debug("timer_expire :: graceful timer expired but state is %s - ignoring", self.state)
+                return
+            if self.is_state_entities_on():
+                self.log.info("timer_expire :: Graceful off - turning off control entities while %s", self.state)
+                self.turn_off_control_entities()
+            else:
+                self.log.debug("timer_expire :: Graceful off - control entities already off")
+            self.update(graceful_off_at=str(datetime.now()))
+            return
         if self.is_duration_sensor() and self.is_sensor_on():  # Ignore timer expiry because duration sensor overwrites timer
             self.update(expires_at="pending sensor")
         else:
@@ -1404,6 +1450,7 @@ class Model:
     # =====================================================
     def on_enter_idle(self):
         self.log.debug("Entering idle")
+        self._cancel_graceful_timer()
         # Entering idle due to no events, set a new context with no parent
         self.set_context(None)
         self.do_transition_behaviour(CONF_ON_ENTER_IDLE)
@@ -1415,6 +1462,7 @@ class Model:
 
     def on_enter_overridden(self):
         self.log.debug("Entering overridden")
+        self._arm_graceful_timer()
         self.do_transition_behaviour(CONF_ON_ENTER_OVERRIDDEN)
         self._schedule_save_state()
 
@@ -1425,6 +1473,7 @@ class Model:
 
     def on_enter_active(self):
         self.log.debug("Entering active")
+        self._cancel_graceful_timer()  # a graceful timer may still be running (e.g. overridden -> active)
         self.update(last_triggered_at=str(datetime.now()))
         self.backoff_count = 0
         self.prepare_service_data()
@@ -1437,8 +1486,14 @@ class Model:
 
     def on_exit_active(self):
         self.log.debug("Exiting active")
-        self.log.debug("on_exit_active :: Turning off entities, cancelling timer")
-        self._cancel_timer()  # cancel previous timer
+        if self.graceful_off and self.timer_handle is not None and self.timer_handle.is_alive():
+            # Keep the timer running for now. The destination state decides:
+            # overridden/constrained arm it (graceful off), idle/blocked/active cancel it.
+            self.log.debug("on_exit_active :: graceful_off - keeping timer alive")
+            self.graceful_candidate = True
+        else:
+            self.log.debug("on_exit_active :: Turning off entities, cancelling timer")
+            self._cancel_timer()  # cancel previous timer
         self.update(
             delay=self.lightParams.get(CONF_DELAY)
         )  # no need to update immediately
@@ -1446,6 +1501,7 @@ class Model:
 
     def on_enter_blocked(self):
         self.log.debug("Entering blocked")
+        self._cancel_graceful_timer()
         self.update(blocked_at=datetime.now())
         self.update(blocked_by=self._state_entity_state())
 
@@ -1465,6 +1521,7 @@ class Model:
 
     def on_enter_constrained(self):
         self.log.debug("Entering constrained")
+        self._arm_graceful_timer()
         self.do_transition_behaviour(CONF_ON_ENTER_CONSTRAINED)
 
     def on_exit_constrained(self):
@@ -1867,6 +1924,10 @@ class Model:
         self.image_path = config.get("image_path", "/conf/temp")
         self.backoff = config.get("backoff", False)
         self.stay = config.get("stay_mode", False)
+        self.graceful_off = config.get(CONF_GRACEFUL_OFF, False)
+        if self.graceful_off:
+            self.log.debug("config_other :: graceful_off enabled - timers survive override/constraint")
+            self.update(graceful_off=True)
 
         if self.backoff:
             self.log.debug("config_other :: setting up backoff. Using delay as initial backoff value.")
@@ -1919,6 +1980,10 @@ class Model:
             # restarts the light stayed on 21 times, with a 20-40 min tail
             # after the last motion).
             "expires_at": str(self._expiry_time) if self._expiry_time else None,
+            # A graceful-off timer (see CONF_GRACEFUL_OFF) keeps running while the
+            # controller sits in overridden/constrained. It has to be finished after
+            # a restart as well, otherwise the light it was about to switch off stays on.
+            "graceful_expires_at": str(self._expiry_time) if (self.graceful_pending and self._expiry_time) else None,
         }
         self.log.debug("_async_save_state :: Saving state: %s", data)
         await self._store.async_save(data)
@@ -1944,6 +2009,20 @@ class Model:
         saved_state = data.get("state")
         self.log.debug("_async_restore_state :: Restoring state '%s' (saved at %s)",
                        saved_state, data.get("saved_at"))
+
+        graceful_expiry = self._parse_saved_expiry(data.get("graceful_expires_at"))
+        if graceful_expiry is not None and saved_state in ("overridden", "constrained"):
+            # A graceful-off timer was running when HA stopped. Finish it outside
+            # the state machine, exactly like an active_timer run-out, whatever
+            # state the normal startup evaluation below settles on.
+            self._pending_restore_expiry = graceful_expiry
+            self._pending_restore_is_graceful = True
+            remaining = max((graceful_expiry - datetime.now()).total_seconds(), 0)
+            self.log.info(
+                "_async_restore_state :: Graceful-off timer from before restart has %.0f s left, scheduling turn-off",
+                remaining)
+            self.update(notes="Graceful-off timer from before restart: %.0f s left" % remaining)
+            event.async_call_later(self.hass, max(remaining, 1), self._restore_timer_finish)
 
         if saved_state == "overridden":
             # Only restore overridden if an override entity is actually on, so
@@ -2036,8 +2115,11 @@ class Model:
         expiry = self._pending_restore_expiry
         if expiry is None:
             return
-        if self.is_active_timer() or self.is_overridden():
+        if self.is_active_timer() or (self.is_overridden() and not self._pending_restore_is_graceful):
+            # A graceful-off run-out is expected to finish *inside* overridden, so in
+            # that case only a fresh active_timer counts as EC having taken over.
             self._pending_restore_expiry = None
+            self._pending_restore_is_graceful = False
             self.log.debug("_restore_timer_finish :: EC has already taken over control, not interfering")
             return
         # The key case: during EC initialisation (STARTUP_DELAY) bulbs behind a
@@ -2055,11 +2137,13 @@ class Model:
                 event.async_call_later(self.hass, 30, self._restore_timer_finish)
             else:
                 self._pending_restore_expiry = None
+                self._pending_restore_is_graceful = False
                 self.log.warning(
                     "_restore_timer_finish :: Controlled entity stayed unavailable, giving up on the run-out")
             return
         if not self.is_state_entities_on():
             self._pending_restore_expiry = None
+            self._pending_restore_is_graceful = False
             self.log.debug("_restore_timer_finish :: The light is no longer on, doing nothing")
             return
         # The entity is available and on. If the timer has not run out yet
@@ -2073,6 +2157,7 @@ class Model:
             event.async_call_later(self.hass, remaining, self._restore_timer_finish)
             return
         self._pending_restore_expiry = None
+        self._pending_restore_is_graceful = False
         self.log.info("_restore_timer_finish :: Turning control entities off (timer from before restart)")
         self.turn_off_control_entities()
         self.update(notes="Turned off by timer carried over the restart")

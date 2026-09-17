@@ -122,6 +122,10 @@ STATES = ['pending', 'idle', 'overridden', 'constrained', 'blocked',
           {'name': 'active', 'children': ['timer', 'stay_on'],
            'initial': False}]
 CONF_IGNORE_STATE_CHANGES_UNTIL = "grace_period"
+# Graceful off: keep the active timer running when the controller is pushed into
+# `overridden` or `constrained` while in `active_timer`, and turn the control
+# entities off when that timer expires instead of leaving them on indefinitely.
+CONF_GRACEFUL_OFF = "graceful_off"
 
 
 CONTEXT_ID_CHARACTER_LIMIT = 26
