@@ -11,7 +11,8 @@
 //     - entity: entity_controller.auto_boundary_light
 //       name: Boundary
 //
-// Options: name, show_entities (default true), show_buttons (default true).
+// Options: name, show_entities (default true), show_buttons (default true),
+// sort_by_state (list mode, default true; false keeps the configured order).
 
 const CARD_TYPE = "entity-controller-card";
 const GLOBAL_SWITCH = "switch.entity_controller";
@@ -122,6 +123,7 @@ class EntityControllerCard extends HTMLElement {
     this._config = {
       show_entities: true,
       show_buttons: true,
+      sort_by_state: true,
       ...config,
     };
     this._list = Array.isArray(config.entities)
@@ -302,14 +304,15 @@ class EntityControllerCard extends HTMLElement {
 
   _renderList() {
     const hass = this._hass;
-    const rows = this._list
-      .map((item) => ({ item, st: hass.states[item.entity] }))
-      .sort((x, y) => {
+    let rows = this._list.map((item) => ({ item, st: hass.states[item.entity] }));
+    if (this._config.sort_by_state) {
+      rows = rows.sort((x, y) => {
         const ox = (STATE_META[x.st?.state] || STATE_META.unavailable).order;
         const oy = (STATE_META[y.st?.state] || STATE_META.unavailable).order;
         return ox - oy || String(x.item.name || x.item.entity).localeCompare(String(y.item.name || y.item.entity));
-      })
-      .map(({ item, st }) => {
+      });
+    }
+    rows = rows.map(({ item, st }) => {
         const meta = STATE_META[st?.state] || STATE_META.unavailable;
         const detail = st ? this._stateLines(st, true).join("") : `<div class="line">not found</div>`;
         return `
@@ -397,6 +400,7 @@ const STYLE = `<style>
 // ---------------------------------------------------------------- visual editor
 
 const EDITOR_TYPE = "entity-controller-card-editor";
+const ROW_EDITOR = "hui-entities-card-row-editor";
 
 const EDITOR_LABELS = {
   mode: "Layout",
@@ -406,6 +410,7 @@ const EDITOR_LABELS = {
   title: "Title (optional)",
   show_entities: "Show sensors and lights",
   show_buttons: "Show action buttons",
+  sort_by_state: "Sort by state (off keeps the order below)",
 };
 
 /** ha-form is part of HA's editor bundle; make sure it is loaded before we render it. */
@@ -446,15 +451,29 @@ class EntityControllerCardEditor extends HTMLElement {
       this._form.addEventListener("value-changed", (ev) => this._valueChanged(ev));
       this.innerHTML = "";
       this.appendChild(this._form);
+      // HA's own entities-card row editor: drag to reorder, add, remove. It is
+      // part of the editor bundle ensureHaForm() loaded; fall back to a plain
+      // multi-select in the form if a future HA drops it.
+      if (customElements.get(ROW_EDITOR)) {
+        this._rows = document.createElement(ROW_EDITOR);
+        this._rows.addEventListener("entities-changed", (ev) => this._rowsChanged(ev));
+        this.appendChild(this._rows);
+      }
       this._loading = false;
     }
     const list = Array.isArray(this._config.entities);
     this._form.hass = this._hass;
+    if (this._rows) {
+      this._rows.hass = this._hass;
+      this._rows.entities = list ? this._config.entities : [];
+      this._rows.style.display = list ? "" : "none";
+    }
     this._form.schema = list
       ? [
           this._modeSchema(),
           { name: "title", selector: { text: {} } },
-          { name: "entities", selector: { entity: { domain: "entity_controller", multiple: true } } },
+          { name: "sort_by_state", selector: { boolean: {} } },
+          ...(this._rows ? [] : [{ name: "entities", selector: { entity: { domain: "entity_controller", multiple: true } } }]),
         ]
       : [
           this._modeSchema(),
@@ -472,7 +491,23 @@ class EntityControllerCardEditor extends HTMLElement {
       entities: list ? this._config.entities.map((e) => (typeof e === "string" ? e : e.entity)) : [],
       show_entities: this._config.show_entities !== false,
       show_buttons: this._config.show_buttons !== false,
+      sort_by_state: this._config.sort_by_state !== false,
     };
+  }
+
+  /** The row editor changed the list (reorder, add, remove): keep the rest of the config. */
+  _rowsChanged(ev) {
+    ev.stopPropagation();
+    const entities = (ev.detail.entities || []).map((e) =>
+      typeof e === "string" ? e : e.name ? { entity: e.entity, name: e.name } : e.entity
+    );
+    this._emit({ ...this._config, entities });
+  }
+
+  _emit(config) {
+    this._config = config;
+    this._render();
+    this.dispatchEvent(new CustomEvent("config-changed", { bubbles: true, composed: true, detail: { config } }));
   }
 
   _modeSchema() {
@@ -496,18 +531,21 @@ class EntityControllerCardEditor extends HTMLElement {
     const config = { type: `custom:${CARD_TYPE}` };
     if (v.mode === "list") {
       if (v.title) config.title = v.title;
+      if (v.sort_by_state === false) config.sort_by_state = false;
       const previous = Array.isArray(this._config.entities) ? this._config.entities : [];
-      const names = new Map(previous.filter((e) => typeof e === "object" && e.name).map((e) => [e.entity, e.name]));
-      config.entities = (v.entities || []).map((id) => (names.has(id) ? { entity: id, name: names.get(id) } : id));
+      if (this._rows) {
+        config.entities = previous;  // the row editor owns the list
+      } else {
+        const names = new Map(previous.filter((e) => typeof e === "object" && e.name).map((e) => [e.entity, e.name]));
+        config.entities = (v.entities || []).map((id) => (names.has(id) ? { entity: id, name: names.get(id) } : id));
+      }
     } else {
       if (v.entity) config.entity = v.entity;
       if (v.name) config.name = v.name;
       if (v.show_entities === false) config.show_entities = false;
       if (v.show_buttons === false) config.show_buttons = false;
     }
-    this._config = config;
-    this._render();
-    this.dispatchEvent(new CustomEvent("config-changed", { bubbles: true, composed: true, detail: { config } }));
+    this._emit(config);
   }
 }
 
