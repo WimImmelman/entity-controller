@@ -2533,3 +2533,22 @@ class TestFrontend:
         assert m.entity.attributes["forced_sensor_entities"] == []
         assert m.entity.attributes["control_entities"] == ["light.a"]
         assert m.entity.attributes["override_entities"] == ["input_boolean.sleep"]
+
+    def test_config_times_publishes_window_edges(self):
+        """The card needs the next window edges immediately, not after the first callback."""
+        m = _build_model()
+        m.entity.attributes = {}
+        m.entity.set_attr = lambda k, v: m.entity.attributes.__setitem__(k, v)
+        m.log_config = MagicMock()
+        m.hass.states.get = MagicMock(return_value=None)
+        with patch("custom_components.entity_controller.event.async_track_point_in_time") as pit, patch(
+            "custom_components.entity_controller.event.async_call_later"
+        ):
+            m.config_times({"start_time": "21:00:00", "end_time": "23:00:00"})
+        assert pit.call_count == 2
+        start_arg = pit.call_args_list[0].args[2]
+        end_arg = pit.call_args_list[1].args[2]
+        assert m.entity.attributes["start_time"] == start_arg
+        assert m.entity.attributes["end_time"] == end_arg
+        assert m.entity.attributes["start"] == "21:00:00"
+

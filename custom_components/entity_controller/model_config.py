@@ -364,6 +364,11 @@ class ModelConfigMixin:
             parsed_end = self.futurize(parsed_end)
             self.log.debug("Setting FIRST START callback for %s", parsed_start)
             self.log.debug("Setting FIRST END callback for %s", parsed_end)
+            # Publish the next window edges right away; until 9.15.0 the
+            # start_time/end_time attributes only appeared after the first
+            # callback had fired, so a controller that started outside its
+            # window showed no opening time on the dashboard card.
+            self.update(start_time=parsed_start, end_time=parsed_end)
 
             self.start_time_event_hook = event.async_track_point_in_time(
                 self.hass, self.start_time_callback, parsed_start
