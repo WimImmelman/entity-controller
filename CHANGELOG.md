@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.17.0"></a>
+## [9.17.0](https://github.com/WimImmelman/entity-controller/compare/v9.16.0...v9.17.0) (2026-09-18)
+
+
+### Features
+
+* **`night_mode.block_timeout`** – Night mode can carry its own block timeout. `Model.effective_block_timeout()` picks the night value while night mode is active and the controller-level `block_timeout` otherwise; `on_enter_blocked` uses it, so it also covers a block entered straight from `idle`. Lets one controller replace the two-instance "morning / rest of day" workaround where only the block timeout differed.
+* **Card list ordering** – The visual editor's list mode now uses HA's own `hui-entities-card-row-editor` (the element behind the entities card): drag rows to reorder, add and remove controllers, with the plain multi-select kept as a fallback if a future HA drops that element. New option `sort_by_state` (default `true`, the previous behaviour); `false` shows the rows in the configured order so the drag order is what you see. Per-entity names survive reordering.
+
+### Tests
+
+* `TestNightModeBlockTimeout` (8 tests): `effective_block_timeout()` prefers the night value at night, the day value by day, falls back when night mode has none or is not configured; entering `blocked` at night and by day arms the matching timer and attribute; `config_night_mode` reads the key; the schema accepts it and rejects negative values.
+
 <a name="9.16.0"></a>
 ## [9.16.0](https://github.com/WimImmelman/entity-controller/compare/v9.15.0...v9.16.0) (2026-09-18)
 

@@ -20,7 +20,7 @@ Entity controller component for Home Assistant.
 Maintainer:       Wim Immelman (this fork)
 Original author:  Daniel Mason (github.com/danobot/entity-controller)
 Fork lineage:     github.com/pluskal/entity-controller (2026 features and fixes)
-Version:          v9.16.0
+Version:          v9.17.0
 Project Page:     https://github.com/WimImmelman/entity-controller
 Documentation:    https://github.com/WimImmelman/entity-controller/blob/main/README.md
 """
@@ -51,7 +51,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ["light", "sensor", "binary_sensor", "cover", "fan", "media_player"]
 
-VERSION = '9.16.0'
+VERSION = '9.17.0'
 
 # A reload happens on a running HA where every entity is already known, so the
 # rebuilt controllers only need a moment for their entities to be registered.
