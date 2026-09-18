@@ -146,7 +146,7 @@ Semantics:
 
 ## State Persistence
 
-EC now persists the `overridden` and `blocked` states across Home Assistant restarts using the built-in HA storage layer. On startup the saved state is re-validated against the current live entity states before being applied, so stale persisted states are silently discarded.
+EC now persists the `overridden` and `blocked` states across Home Assistant restarts using the built-in HA storage layer. On startup the saved state is re-validated against the current live entity states before being applied, so stale persisted states are silently discarded. A restored `blocked` state leaves the (manually switched on) light on; a restored `active_timer` finishes its run-out and switches the light off when the timer would have expired.
 
 No configuration is required — persistence is enabled automatically.
 

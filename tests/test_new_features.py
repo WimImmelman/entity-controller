@@ -135,6 +135,7 @@ def _build_model(hass=None, entity=None, config=None):
         m._pending_restore_expiry = None
         m._pending_restore_is_graceful = False
         m._restore_retries = 0
+        m._restoring = False
         m.homeassistant_turn_on_domains = ["group"]
         # reload support (see Model.async_teardown)
         m._machine = machine
@@ -590,6 +591,64 @@ class TestStatePersistence:
         result = asyncio.run(m._async_restore_state())
         assert result is False
         m.override.assert_not_called()
+
+    def _blocked_restore_model(self, light_on=True):
+        m = _build_model()
+        m.stateEntities = ["light.test"]
+        m.controlEntities = ["light.test"]
+        m.turn_off_control_entities = MagicMock()
+        m.turn_on_control_entities = MagicMock()
+        m.is_state_entities_on = MagicMock(return_value=light_on)
+        m.is_state_entities_off = MagicMock(return_value=not light_on)
+        m.is_block_enabled = MagicMock(return_value=True)
+        # back to 'pending' as at startup: _build_model already started monitoring
+        m.to_pending()
+        store = AsyncMock()
+        store.async_load = AsyncMock(return_value={"state": "blocked", "saved_at": "x"})
+        m._store = store
+        return m
+
+    def test_async_restore_blocked_keeps_manually_lit_light_on(self):
+        """Regression: restoring 'blocked' must not switch the light off on the way through idle.
+
+        Boundary light, 2026-09-17 21:39: HA restarted while the light was on by
+        hand and EC blocked. The restore went pending -> idle -> blocked and idle's
+        default 'off' behaviour switched the light off; EC then ignored the off
+        event (own context) and stayed blocked with the light off all night.
+        """
+        m = self._blocked_restore_model()
+        result = asyncio.run(m._async_restore_state())
+        assert result is True
+        assert m.state == "blocked"
+        m.turn_off_control_entities.assert_not_called()
+        assert m._restoring is False
+
+    def test_async_restore_blocked_falls_through_when_light_off(self):
+        m = self._blocked_restore_model(light_on=False)
+        result = asyncio.run(m._async_restore_state())
+        assert result is False
+        assert m.state == "pending"
+        m.turn_off_control_entities.assert_not_called()
+
+    def test_restoring_flag_is_reset_even_if_transition_raises(self):
+        m = self._blocked_restore_model()
+        m.sensor_on = MagicMock(side_effect=RuntimeError("boom"))
+        with pytest.raises(RuntimeError):
+            asyncio.run(m._async_restore_state())
+        assert m._restoring is False
+
+    def test_normal_idle_entry_still_turns_off(self):
+        """The skip is scoped to the restore: a regular timer expiry still switches off."""
+        m = _build_model()
+        m.turn_off_control_entities = MagicMock()
+        m.turn_on_control_entities = MagicMock()
+        m.is_state_entities_off = MagicMock(return_value=True)
+        m.is_state_entities_on = MagicMock(return_value=False)
+        m.sensor_on()
+        assert m.state == "active_timer"
+        m.timer_expires()
+        assert m.state == "idle"
+        m.turn_off_control_entities.assert_called_once()
 
     def test_async_restore_idle_falls_through(self):
         from custom_components.entity_controller import Model

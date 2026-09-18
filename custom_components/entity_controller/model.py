@@ -94,6 +94,7 @@ class Model(
         self._expiry_time = None   # kdy ma dobehnout timer (pro obnovu po restartu)
         self._pending_restore_expiry = None  # timer run-out carried over a restart
         self._restore_retries = 0            # kolikrat jsme cekali na nedostupnou entitu
+        self._restoring = False              # True while _async_restore_state walks the machine to a saved state
         self._pending_restore_is_graceful = False  # the carried-over run-out is a graceful-off timer
         self.block_timer_handle = None
         # graceful_off support (see CONF_GRACEFUL_OFF)
@@ -259,7 +260,12 @@ class Model(
         self._cancel_graceful_timer()
         # Entering idle due to no events, set a new context with no parent
         self.set_context(None)
-        self.do_transition_behaviour(CONF_ON_ENTER_IDLE)
+        if getattr(self, "_restoring", False):
+            # Passing through idle on the way to a restored state: the light is
+            # on for a reason, do not switch it off (see _async_restore_state).
+            self.log.debug("on_enter_idle :: restoring, skipping the entry behaviour")
+        else:
+            self.do_transition_behaviour(CONF_ON_ENTER_IDLE)
         self.entity.reset_state()
 
     def on_exit_idle(self):

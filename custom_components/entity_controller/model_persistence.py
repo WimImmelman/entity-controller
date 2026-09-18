@@ -125,8 +125,19 @@ class ModelPersistenceMixin:
             # Only restore blocked if the state entity is still on (otherwise the
             # entity was turned off while HA was down — go to idle instead).
             if self.is_state_entities_on() and self.is_block_enabled():
-                self.start_monitoring()
-                self.sensor_on()  # triggers idle→active→blocked via normal transitions
+                # The route to blocked passes through idle, whose default entry
+                # behaviour switches the control entities off. That is exactly
+                # wrong here: the light is on because somebody switched it on by
+                # hand, and 'blocked' means "leave it alone". Until 9.13.1 the
+                # off command went out anyway, EC ignored the resulting off event
+                # (its own context) and sat in blocked with the light off for the
+                # rest of the night (boundary light, 2026-09-17 21:39).
+                self._restoring = True
+                try:
+                    self.start_monitoring()
+                    self.sensor_on()  # idle -> blocked via the normal transition
+                finally:
+                    self._restoring = False
                 return True
             return False
 
