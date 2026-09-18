@@ -39,6 +39,8 @@ Issues and pull requests are welcome at [github.com/WimImmelman/entity-controlle
 | `sensor` / `sensors` | entity id(s) | — | Motion/binary sensor(s) that trigger activation |
 | `entity` / `entities` | entity id(s) | — | Entities to control (lights, switches, …) |
 | `delay` | seconds | 180 | How long to stay active after the last trigger |
+| `sensor_type` | `event` / `duration` | `event` | `duration` sensors (PIR/occupancy that stay `on`) hold the timer while on; the light only goes off once every sensor is off. |
+| `sensor_resets_timer` | boolean | `false` | With `duration` sensors: restart the timer when a sensor turns off, so the light stays on for the full `delay` after the last sensor drops. Without it the timer runs from activation and the light goes off the moment the last sensor drops once it has expired. |
 
 ## Forced Sensors (`forced_sensors`)
 
