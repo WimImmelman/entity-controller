@@ -182,7 +182,7 @@ entity_controller:
 
 ## Dashboard card
 
-The integration ships its own dashboard card and registers it as a dashboard resource on startup, so there is nothing extra to install. Add it from the card picker ("Entity Controller Card") or in YAML:
+The integration ships its own dashboard card and registers it as a dashboard resource on startup, so there is nothing extra to install. Add it from the card picker ("Entity Controller Card"), where a visual editor lets you pick the layout (one controller in detail, or a compact list), the controller(s), a name or title and the two show toggles. Per-entity names in list mode are YAML only. The equivalent YAML:
 
 ```yaml
 # one controller in detail
@@ -202,7 +202,7 @@ entities:
 |--------|---------|-------------|
 | `entity` | — | Controller to show in detail. |
 | `entities` | — | List of controllers (entity id, or `{entity, name}`) for the compact list. Sorted active → blocked → overridden → idle → constrained. |
-| `name` / `title` | friendly name | Card heading. |
+| `name` / `title` | friendly name | Card heading. Without one the card uses the controller's `friendly_name`, or a readable form of its YAML key (`auto_playroom_light` → "Playroom light"). |
 | `show_entities` | `true` | Detail card: show the sensor, hold, forced, light and override entities with live on/off dots. |
 | `show_buttons` | `true` | Detail card: Activate (idle, blocked) / Clear block (blocked) / Block (active_timer) buttons; they call the matching `entity_controller.*` services. The info icon in the header and every entity chip open the more-info dialog. |
 

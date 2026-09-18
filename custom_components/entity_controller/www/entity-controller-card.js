@@ -88,9 +88,19 @@ function countdown(date) {
   return `<span class="cd" data-until="${date.getTime()}">${fmtDuration(date.getTime() - Date.now())}</span>`;
 }
 
+/** "auto_playroom_light" -> "Playroom light": used when a controller has no friendly_name of its own. */
+function humanize(objectId) {
+  const words = String(objectId || "").replace(/^auto_/, "").split("_").filter(Boolean);
+  return words.map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(" ");
+}
+
 function friendly(hass, entityId, fallback) {
   const st = hass.states[entityId];
-  return (st && st.attributes && st.attributes.friendly_name) || fallback || shortName(entityId);
+  const objectId = String(entityId || "").split(".").pop();
+  const fn = st && st.attributes && st.attributes.friendly_name;
+  // EC uses the YAML key as friendly_name unless `friendly_name:` is configured
+  if (fn && fn !== objectId) return fn;
+  return fallback || humanize(objectId);
 }
 
 // ---------------------------------------------------------------- card
@@ -99,6 +109,10 @@ class EntityControllerCard extends HTMLElement {
   static getStubConfig(hass) {
     const first = Object.keys(hass.states).find((id) => id.startsWith("entity_controller."));
     return { entity: first || "entity_controller.example" };
+  }
+
+  static getConfigElement() {
+    return document.createElement(EDITOR_TYPE);
   }
 
   setConfig(config) {
@@ -380,6 +394,126 @@ const STYLE = `<style>
   .rdetail ha-icon { --mdc-icon-size: 14px; }
 </style>`;
 
+// ---------------------------------------------------------------- visual editor
+
+const EDITOR_TYPE = "entity-controller-card-editor";
+
+const EDITOR_LABELS = {
+  mode: "Layout",
+  entity: "Controller",
+  entities: "Controllers",
+  name: "Name (optional)",
+  title: "Title (optional)",
+  show_entities: "Show sensors and lights",
+  show_buttons: "Show action buttons",
+};
+
+/** ha-form is part of HA's editor bundle; make sure it is loaded before we render it. */
+async function ensureHaForm() {
+  if (customElements.get("ha-form")) return;
+  try {
+    const helpers = await window.loadCardHelpers();
+    const probe = await helpers.createCardElement({ type: "entities", entities: [] });
+    if (probe && probe.constructor && probe.constructor.getConfigElement) {
+      await probe.constructor.getConfigElement();
+    }
+  } catch (e) {
+    // fall through: ha-form may still turn up, and the YAML editor keeps working regardless
+  }
+  await customElements.whenDefined("ha-form");
+}
+
+class EntityControllerCardEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+    this._render();
+  }
+
+  async _render() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      if (this._loading) return;
+      this._loading = true;
+      await ensureHaForm();
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => EDITOR_LABELS[schema.name] || schema.name;
+      this._form.addEventListener("value-changed", (ev) => this._valueChanged(ev));
+      this.innerHTML = "";
+      this.appendChild(this._form);
+      this._loading = false;
+    }
+    const list = Array.isArray(this._config.entities);
+    this._form.hass = this._hass;
+    this._form.schema = list
+      ? [
+          this._modeSchema(),
+          { name: "title", selector: { text: {} } },
+          { name: "entities", selector: { entity: { domain: "entity_controller", multiple: true } } },
+        ]
+      : [
+          this._modeSchema(),
+          { name: "entity", selector: { entity: { domain: "entity_controller" } } },
+          { name: "name", selector: { text: {} } },
+          { name: "show_entities", selector: { boolean: {} } },
+          { name: "show_buttons", selector: { boolean: {} } },
+        ];
+    this._form.data = {
+      mode: list ? "list" : "single",
+      entity: this._config.entity || "",
+      name: this._config.name || "",
+      title: this._config.title || "",
+      // the multi-entity selector works on ids; {entity, name} items keep their name on the way back
+      entities: list ? this._config.entities.map((e) => (typeof e === "string" ? e : e.entity)) : [],
+      show_entities: this._config.show_entities !== false,
+      show_buttons: this._config.show_buttons !== false,
+    };
+  }
+
+  _modeSchema() {
+    return {
+      name: "mode",
+      selector: {
+        select: {
+          mode: "dropdown",
+          options: [
+            { value: "single", label: "One controller in detail" },
+            { value: "list", label: "Compact list of controllers" },
+          ],
+        },
+      },
+    };
+  }
+
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    const v = ev.detail.value || {};
+    const config = { type: `custom:${CARD_TYPE}` };
+    if (v.mode === "list") {
+      if (v.title) config.title = v.title;
+      const previous = Array.isArray(this._config.entities) ? this._config.entities : [];
+      const names = new Map(previous.filter((e) => typeof e === "object" && e.name).map((e) => [e.entity, e.name]));
+      config.entities = (v.entities || []).map((id) => (names.has(id) ? { entity: id, name: names.get(id) } : id));
+    } else {
+      if (v.entity) config.entity = v.entity;
+      if (v.name) config.name = v.name;
+      if (v.show_entities === false) config.show_entities = false;
+      if (v.show_buttons === false) config.show_buttons = false;
+    }
+    this._config = config;
+    this._render();
+    this.dispatchEvent(new CustomEvent("config-changed", { bubbles: true, composed: true, detail: { config } }));
+  }
+}
+
+if (!customElements.get(EDITOR_TYPE)) {
+  customElements.define(EDITOR_TYPE, EntityControllerCardEditor);
+}
 if (!customElements.get(CARD_TYPE)) {
   customElements.define(CARD_TYPE, EntityControllerCard);
 }
