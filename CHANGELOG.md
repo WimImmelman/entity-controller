@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.13.2"></a>
+## [9.13.2](https://github.com/WimImmelman/entity-controller/compare/v9.13.1...v9.13.2) (2026-09-18)
+
+
+### Bug Fixes
+
+* **restoring `blocked` switched the light off** – When HA restarted while a controller was `blocked` (light switched on by hand), the persistence layer restored the state by walking `pending → idle → blocked`. Entering `idle` runs the default `on_enter_idle: off` behaviour, so EC switched the manually lit light off, then ignored the resulting off event because it carried EC's own context, and sat in `blocked` with the light off until the next constraint or override. Seen on the boundary light on 2026-09-17: restart at 21:38, light off at 21:39:14, doorbell motion at 23:11 ignored, dark until sunrise. `Model` now sets `_restoring` while `_async_restore_state` walks the machine and `on_enter_idle` skips the entry behaviour in that case. Restoring `active_timer` is unchanged: EC still settles in `idle` and finishes the run-out through `_restore_timer_finish`.
+
+### Tests
+
+* `TestStatePersistence`: restoring `blocked` keeps a manually lit light on and lands in `blocked`; falls through to normal startup when the light is off; `_restoring` is reset even when the transition raises; a regular timer expiry into `idle` still switches the light off.
+
 <a name="9.13.1"></a>
 ## [9.13.1](https://github.com/WimImmelman/entity-controller/compare/v9.13.0...v9.13.1) (2026-09-17)
 
