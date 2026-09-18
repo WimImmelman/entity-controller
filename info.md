@@ -22,6 +22,7 @@ entity_controller:
 - **`graceful_off`** (v9.12.0) – A timer cut short by an override or `end_time` keeps running and still switches the light off when it expires, instead of leaving it on indefinitely. Survives HA restarts.
 - **`entity_controller.reload`** (v9.13.0) – Re-read the YAML and rebuild the controllers without restarting Home Assistant; invalid YAML keeps the running controllers.
 - **`switch.entity_controller`** (v9.14.0) – A built-in master switch: OFF overrides every controller, ON releases them. No YAML needed, state survives restarts.
+- **Dashboard card** (v9.15.0) – `custom:entity-controller-card`, bundled and registered automatically: state, live countdowns, sensors and lights with on/off dots, and service buttons for one controller, or a compact list of many.
 - From pluskal's fork (v9.8 to v9.11): **state persistence** with timer run-out across restarts, **`forced_sensors`**, **`event_sensors`**, **`hold_sensors`**, **lux constraint** (`lux_entity`/`lux_threshold`), **entity-driven night mode**, **`grace_period`**, and fixes for controllers getting stuck in `blocked` or looping at `start_time`/`end_time`.
 
 See the [CHANGELOG](https://github.com/WimImmelman/entity-controller/blob/main/CHANGELOG.md) for details.

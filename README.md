@@ -21,7 +21,7 @@ motion_light:
 ## Lineage
 - **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024).
 - **[pluskal](https://github.com/pluskal/entity-controller)** added, in 2026, state persistence with timer run-out across restarts, forced/event/hold sensors, the lux constraint, entity-driven night mode, `grace_period`, and a series of state-machine fixes (v9.8.0 to v9.11.1).
-- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0), the `entity_controller.reload` service (v9.13.0), the global `switch.entity_controller` (v9.14.0) and repository housekeeping.
+- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0), the `entity_controller.reload` service (v9.13.0), the global `switch.entity_controller` (v9.14.0), the bundled dashboard card (v9.15.0) and repository housekeeping.
 
 Licensed under the GPL-3.0, as the original. See [COPYING](COPYING).
 
@@ -179,6 +179,36 @@ entity_controller:
 
 **When to use it:** Only needed for integrations where state-change events arrive with a context unrelated to the original EC service call (cloud integrations, gateway bridges, etc.). Standard local integrations — where HA propagates the service-call context through to the state-change event — are handled correctly by the existing context check and do not need this option.
 
+
+## Dashboard card
+
+The integration ships its own dashboard card and registers it as a dashboard resource on startup, so there is nothing extra to install. Add it from the card picker ("Entity Controller Card") or in YAML:
+
+```yaml
+# one controller in detail
+type: custom:entity-controller-card
+entity: entity_controller.auto_kitchen_lights
+
+# several controllers as a compact list, sorted by state
+type: custom:entity-controller-card
+title: Auto lights
+entities:
+  - entity_controller.auto_kitchen_lights
+  - entity: entity_controller.auto_boundary_light
+    name: Boundary
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `entity` | — | Controller to show in detail. |
+| `entities` | — | List of controllers (entity id, or `{entity, name}`) for the compact list. Sorted active → blocked → overridden → idle → constrained. |
+| `name` / `title` | friendly name | Card heading. |
+| `show_entities` | `true` | Detail card: show the sensor, hold, forced, light and override entities with live on/off dots. |
+| `show_buttons` | `true` | Detail card: Activate (idle, blocked) / Clear block (blocked) / Block (active_timer) buttons; they call the matching `entity_controller.*` services. The info icon in the header and every entity chip open the more-info dialog. |
+
+What the card shows depends on the state: `active_timer` shows who triggered it and a live countdown to the switch-off; `blocked` shows what blocked it and when the block clears; `overridden` and `constrained` show the cause, when the window opens next and a pending `graceful_off` run-out; `idle` shows the last trigger and when the window closes. A banner appears on every card while `switch.entity_controller` is off.
+
+The card is served from `/entity_controller_frontend/entity-controller-card.js` and added to Settings → Dashboards → Resources automatically when HA manages the resources (the default). If your dashboards are in YAML mode, add that URL as a JavaScript module resource yourself; the log says so at startup.
 
 ## Global switch (`switch.entity_controller`)
 

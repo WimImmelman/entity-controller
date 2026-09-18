@@ -2409,3 +2409,127 @@ class TestGlobalSwitch:
         asyncio.run(async_setup_platform(_make_hass(), {}, add, discovery_info={}))
         (entities,), _ = add.call_args
         assert isinstance(entities[0], EntityControllerGlobalSwitch)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard card: frontend.py
+# ---------------------------------------------------------------------------
+
+class TestFrontend:
+
+    def test_resource_url_carries_version(self):
+        from custom_components.entity_controller.frontend import card_resource_url, CARD_URL
+        assert card_resource_url("9.15.0") == f"{CARD_URL}?v=9.15.0"
+        assert CARD_URL == "/entity_controller_frontend/entity-controller-card.js"
+
+    def test_static_path_new_api(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        hass.http.async_register_static_paths = AsyncMock()
+        fake_http = MagicMock()
+        fake_http.StaticPathConfig = MagicMock(side_effect=lambda url, path, cache_headers: (url, path, cache_headers))
+        with patch.dict("sys.modules", {"homeassistant.components.http": fake_http}):
+            asyncio.run(frontend._async_register_static_path(hass))
+        hass.http.async_register_static_paths.assert_awaited_once()
+        (configs,), _ = hass.http.async_register_static_paths.await_args
+        url, path, cache = configs[0]
+        assert url == frontend.CARD_URL and path.endswith("entity-controller-card.js") and cache is False
+        hass.http.register_static_path.assert_not_called()
+
+    def test_static_path_old_api_fallback(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        import builtins
+        real_import = builtins.__import__
+
+        def _no_static_path_config(name, *a, **k):
+            if name == "homeassistant.components.http":
+                raise ImportError("no StaticPathConfig")
+            return real_import(name, *a, **k)
+        with patch("builtins.__import__", side_effect=_no_static_path_config):
+            asyncio.run(frontend._async_register_static_path(hass))
+        hass.http.register_static_path.assert_called_once()
+        assert hass.http.register_static_path.call_args.args[0] == frontend.CARD_URL
+
+    def _resources(self, items):
+        res = MagicMock()
+        res.loaded = True
+        res.async_items = MagicMock(return_value=items)
+        res.async_create_item = AsyncMock()
+        res.async_update_item = AsyncMock()
+        return res
+
+    def test_resource_created_when_missing(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        res = self._resources([{"id": "x", "url": "/hacsfiles/other-card.js", "res_type": "module"}])
+        hass.data = {"lovelace": MagicMock(resources=res)}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "created"
+        res.async_create_item.assert_awaited_once_with({"res_type": "module", "url": frontend.card_resource_url("9.15.0")})
+        res.async_update_item.assert_not_awaited()
+
+    def test_resource_updated_when_version_differs(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        res = self._resources([{"id": "abc", "url": frontend.card_resource_url("9.14.0"), "res_type": "module"}])
+        hass.data = {"lovelace": MagicMock(resources=res)}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "updated"
+        res.async_update_item.assert_awaited_once_with("abc", {"res_type": "module", "url": frontend.card_resource_url("9.15.0")})
+        res.async_create_item.assert_not_awaited()
+
+    def test_resource_unchanged_when_current(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        res = self._resources([{"id": "abc", "url": frontend.card_resource_url("9.15.0"), "res_type": "module"}])
+        res.loaded = False
+        res.async_load = AsyncMock()
+        hass.data = {"lovelace": MagicMock(resources=res)}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "unchanged"
+        res.async_load.assert_awaited_once()  # storage collection loaded on demand
+        res.async_create_item.assert_not_awaited()
+        res.async_update_item.assert_not_awaited()
+
+    def test_resource_skipped_in_yaml_mode_or_without_lovelace(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        hass.data = {}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "skipped"
+        yaml_res = MagicMock(spec=["async_items"])  # ResourceYAMLCollection: read-only
+        hass.data = {"lovelace": MagicMock(resources=yaml_res)}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "skipped"
+        # a plain-dict lovelace store (older HA) is understood too
+        res = self._resources([])
+        hass.data = {"lovelace": {"resources": res}}
+        assert asyncio.run(frontend.async_register_resource(hass, "9.15.0")) == "created"
+
+    def test_resource_registration_deferred_until_started(self):
+        from custom_components.entity_controller import frontend
+        hass = _make_hass()
+        hass.is_running = False
+        hass.data = {}
+        with patch.object(frontend, "_async_register_static_path", new=AsyncMock()), patch.object(
+            frontend, "async_register_resource", new=AsyncMock()
+        ) as reg:
+            asyncio.run(frontend.async_setup_frontend(hass, "9.15.0"))
+            reg.assert_not_awaited()
+            (event_name, cb), _ = hass.bus.async_listen_once.call_args
+            assert event_name == "homeassistant_started"
+            asyncio.run(cb(None))
+            reg.assert_awaited_once_with(hass, "9.15.0")
+
+    def test_startup_publishes_entity_lists(self):
+        m = _build_model()
+        m.entity.attributes = {}
+        m.entity.set_attr = lambda k, v: m.entity.attributes.__setitem__(k, v)
+        m.sensorEntities = ["binary_sensor.pir"]
+        m.holdSensorEntities = ["binary_sensor.pc"]
+        m.forcedSensorEntities = []
+        m.controlEntities = ["light.a"]
+        m.stateEntities = ["light.a"]
+        m.overrideEntities = ["input_boolean.sleep"]
+        m._publish_entity_lists()
+        assert m.entity.attributes["sensor_entities"] == ["binary_sensor.pir"]
+        assert m.entity.attributes["hold_sensor_entities"] == ["binary_sensor.pc"]
+        assert m.entity.attributes["forced_sensor_entities"] == []
+        assert m.entity.attributes["control_entities"] == ["light.a"]
+        assert m.entity.attributes["override_entities"] == ["input_boolean.sleep"]

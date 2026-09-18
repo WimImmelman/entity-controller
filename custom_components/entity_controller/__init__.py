@@ -37,6 +37,7 @@ from homeassistant.util import dt
 
 from .entity import EntityController
 from .entity_services import async_setup_entity_services
+from .frontend import async_setup_frontend
 from .model import Model, STARTUP_DELAY
 from .schema import MODE_SCHEMA, ENTITY_SCHEMA, PLATFORM_SCHEMA
 from .state_machine import build_machine
@@ -102,6 +103,9 @@ async def async_setup(hass, config):
     # The global switch lives in its own platform; the integration loads it so
     # it exists without any YAML and survives entity_controller.reload.
     hass.async_create_task(async_load_platform(hass, "switch", DOMAIN, {}, config))
+
+    # Serve the bundled dashboard card and register it as a Lovelace resource.
+    await async_setup_frontend(hass, VERSION)
 
     async def _async_handle_reload(call):
         await async_reload(hass)

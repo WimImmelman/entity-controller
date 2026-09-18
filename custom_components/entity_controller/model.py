@@ -209,6 +209,7 @@ class Model(
         self.config_times(config)
         self.config_other(config)
         self.prepare_service_data()
+        self._publish_entity_lists()
 
         # Phase 2: Set up state persistence store and register shutdown handler
         self._store = Store(self.hass, STORAGE_VERSION, self._storage_key())
@@ -225,6 +226,17 @@ class Model(
                 self.update(overridden_at=str(datetime.now()))
             else:
                 self.start_monitoring()
+
+    def _publish_entity_lists(self):
+        """Expose the configured entity lists as attributes (used by the dashboard card)."""
+        self.update(
+            sensor_entities=list(self.sensorEntities),
+            hold_sensor_entities=list(getattr(self, "holdSensorEntities", []) or []),
+            forced_sensor_entities=list(self.forcedSensorEntities),
+            control_entities=list(self.controlEntities),
+            state_entities=list(self.stateEntities),
+            override_entities=list(self.overrideEntities),
+        )
 
     def update(self, wait=False, **kwargs):
         """ Called from different methods to report a state attribute change """

@@ -85,6 +85,8 @@ class EntityController(entity.Entity):
             CONF_STATE_ENTITIES,
             "control_entities",
             "sensor_entities",
+            "hold_sensor_entities",
+            "forced_sensor_entities",
             "override_entities",
             CONF_DELAY,
             "sensor_type",
