@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.17.1"></a>
+## [9.17.1](https://github.com/WimImmelman/entity-controller/compare/v9.17.0...v9.17.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* **Card entity chips** – When the sensor or light chips wrapped to a second line they started at the card's left edge, under the group label; the chips now sit in their own wrapping container so continuation lines stay indented under the first chip.
+
 <a name="9.17.0"></a>
 ## [9.17.0](https://github.com/WimImmelman/entity-controller/compare/v9.16.0...v9.17.0) (2026-09-18)
 
