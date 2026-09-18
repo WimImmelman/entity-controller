@@ -293,7 +293,7 @@ class EntityControllerCard extends HTMLElement {
         return `<span class="ent ${on ? "on" : ""} ${missing ? "missing" : ""}" data-action="more-info" data-entity="${esc(id)}" title="${esc(id)}">
           <i class="dot"></i>${esc(friendly(hass, id))}${tag ? `<em>${tag}</em>` : ""}</span>`;
       });
-      rows.push(`<div class="group"><span class="glabel">${label}</span>${items.join("")}</div>`);
+      rows.push(`<div class="group"><span class="glabel">${label}</span><span class="gitems">${items.join("")}</span></div>`);
     }
     return rows.length ? `<div class="entities">${rows.join("")}</div>` : "";
   }
@@ -375,8 +375,9 @@ const STYLE = `<style>
   .note { color: var(--secondary-text-color); font-style: italic; font-size: 12px; margin-top:2px; }
   .warn { color: var(--error-color, #db4437); }
   .entities { border-top: 1px solid var(--divider-color); margin-top: 8px; padding-top: 8px; display:flex; flex-direction:column; gap:4px; }
-  .group { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-  .glabel { color: var(--secondary-text-color); font-size: 12px; width: 62px; flex:none; }
+  .group { display:flex; align-items:flex-start; gap:6px; }
+  .glabel { color: var(--secondary-text-color); font-size: 12px; width: 62px; flex:none; line-height: 20px; }
+  .gitems { display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0; }  /* wrapped chips stay indented under the first */
   .ent { display:inline-flex; align-items:center; gap:5px; background: var(--secondary-background-color, #f0f0f0); border-radius: 12px; padding: 2px 9px; font-size: 12px; cursor:pointer; }
   .ent em { font-style: normal; color: var(--secondary-text-color); font-size: 10px; text-transform: uppercase; }
   .ent.missing { opacity: .5; text-decoration: line-through; }
