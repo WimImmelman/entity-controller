@@ -107,6 +107,32 @@ A lux entity that is `unavailable`, missing, or otherwise unmatched (numeric on 
 
 When an activation is blocked, the EC entity records `lux_blocked_at` and `lux_at_last_block` attributes for diagnostics; `lux_entity` and `lux_threshold` are always shown as attributes when the constraint is active.
 
+## Night-mode block timeout (`night_mode: block_timeout`)
+
+**Problem:** `night_mode` gives a second `delay`, `service_data` and set of `entities` for part of the day, but the block timeout (how long EC leaves a hand-switched light alone before taking over again) was one value for the whole day. A bathroom light that should be left alone for 30 minutes in the morning rush but only 10 minutes for the rest of the day needed two controllers on the same light, with an awkward handover at the boundary.
+
+**Solution:** `night_mode` accepts its own `block_timeout`. It is evaluated when the controller enters `blocked`, so it also applies to a block entered straight from `idle` (light switched on by hand, then motion). Omit it and night mode keeps using the controller-level `block_timeout`.
+
+```yaml
+entity_controller:
+  ensuite:
+    sensors:
+      - binary_sensor.ensuite_motion_occupancy
+    entities:
+      - light.ensuite
+    delay: 300            # rest of the day: 5 min timer, 10 min block
+    block_timeout: 600
+    night_mode:           # 05:00-08:00: 30 min timer, 30 min block
+      start_time: '05:00:00'
+      end_time: '08:00:00'
+      delay: 1800
+      block_timeout: 1800
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `night_mode.block_timeout` | seconds | controller `block_timeout` | Block timeout used while night mode is active. |
+
 ## Entity-Driven Night Mode (`night_mode: entity` / `entity_states` / `entities`)
 
 `night_mode` historically switched to alternate service parameters (dimmer

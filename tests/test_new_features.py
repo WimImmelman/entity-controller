@@ -2552,3 +2552,74 @@ class TestFrontend:
         assert m.entity.attributes["end_time"] == end_arg
         assert m.entity.attributes["start"] == "21:00:00"
 
+
+# ---------------------------------------------------------------------------
+# night_mode.block_timeout
+# ---------------------------------------------------------------------------
+
+class TestNightModeBlockTimeout:
+
+    def _model(self, night=True, night_block=1800, day_block=600):
+        m = _build_model()
+        m.block_timeout = day_block
+        m.night_mode = {"start_time": "05:00:00", "end_time": "08:00:00"}
+        m.night_block_timeout = night_block
+        m.is_night = MagicMock(return_value=night)
+        m.turn_off_control_entities = MagicMock()
+        m.turn_on_control_entities = MagicMock()
+        m.entity.attributes = {}
+        m.entity.set_attr = lambda k, v: m.entity.attributes.__setitem__(k, v)
+        m.is_state_entities_on = MagicMock(return_value=True)
+        m.is_state_entities_off = MagicMock(return_value=False)
+        m.is_block_enabled = MagicMock(return_value=True)
+        return m
+
+    def test_effective_block_timeout_prefers_night_value_at_night(self):
+        m = self._model(night=True)
+        assert m.effective_block_timeout() == 1800
+
+    def test_effective_block_timeout_uses_day_value_by_day(self):
+        m = self._model(night=False)
+        assert m.effective_block_timeout() == 600
+
+    def test_effective_block_timeout_falls_back_when_night_has_none(self):
+        m = self._model(night=True, night_block=None)
+        assert m.effective_block_timeout() == 600
+
+    def test_effective_block_timeout_without_night_mode(self):
+        m = self._model(night=True)
+        m.night_mode = None
+        assert m.effective_block_timeout() == 600
+
+    def test_entering_blocked_at_night_arms_night_timeout(self):
+        m = self._model(night=True)
+        with patch("custom_components.entity_controller.model.Timer") as timer:
+            m.sensor_on()  # idle + light already on -> blocked
+        assert m.state == "blocked"
+        timer.assert_called_once_with(1800, m.block_timer_expire)
+        assert m.entity.attributes["block_timeout"] == 1800
+
+    def test_entering_blocked_by_day_arms_day_timeout(self):
+        m = self._model(night=False)
+        with patch("custom_components.entity_controller.model.Timer") as timer:
+            m.sensor_on()
+        assert m.state == "blocked"
+        timer.assert_called_once_with(600, m.block_timer_expire)
+
+    def test_config_night_mode_reads_block_timeout(self):
+        m = _build_model()
+        m.light_params_day = {"delay": 300, "service_data": None, "service_data_off": None}
+        m.config_night_mode({"night_mode": {"start_time": "05:00:00", "end_time": "08:00:00", "delay": 1800, "block_timeout": 1800}})
+        assert m.night_block_timeout == 1800
+        m2 = _build_model()
+        m2.light_params_day = {"delay": 300, "service_data": None, "service_data_off": None}
+        m2.config_night_mode({"night_mode": {"start_time": "05:00:00", "end_time": "08:00:00", "delay": 1800}})
+        assert m2.night_block_timeout is None
+
+    def test_schema_accepts_block_timeout(self):
+        from custom_components.entity_controller import MODE_SCHEMA
+        out = MODE_SCHEMA({"start_time": "05:00:00", "end_time": "08:00:00", "delay": 1800, "block_timeout": 1800})
+        assert out["block_timeout"] == 1800
+        with pytest.raises(Exception):
+            MODE_SCHEMA({"start_time": "05:00:00", "end_time": "08:00:00", "block_timeout": -5})
+

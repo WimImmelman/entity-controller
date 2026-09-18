@@ -87,6 +87,7 @@ class Model(
         self.graceful_pending = False    # timer is running while in overridden/constrained
         self.sensor_type = None
         self.night_mode = None
+        self.night_block_timeout = None
         self.state_attributes_ignore = []
         self.backoff = False
         self.backoff_count = 0
@@ -314,10 +315,11 @@ class Model(
         self.update(blocked_by=self._state_entity_state())
 
         self.do_transition_behaviour(CONF_ON_ENTER_BLOCKED)
-        if self.block_timeout:
-            self.block_timer_handle = Timer(self.block_timeout, self.block_timer_expire)
+        block_timeout = self.effective_block_timeout()
+        if block_timeout:
+            self.block_timer_handle = Timer(block_timeout, self.block_timer_expire)
             self.block_timer_handle.start()
-            self.update(block_timeout=self.block_timeout)
+            self.update(block_timeout=block_timeout)
         self._schedule_save_state()
 
     def on_exit_blocked(self):

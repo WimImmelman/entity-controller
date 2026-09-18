@@ -65,6 +65,7 @@ MODE_SCHEMA = vol.Schema(
             ),
             vol.Optional(CONF_NIGHT_MODE_ENTITIES, default=[]): cv.entity_ids,
             vol.Optional(CONF_DELAY, default=DEFAULT_DELAY): cv.positive_int,
+            vol.Optional(CONF_BLOCK_TIMEOUT): cv.positive_int,
         },
         # night detection needs a time window, a state entity, or both
         cv.has_at_least_one_key(CONF_NIGHT_MODE_ENTITY, CONF_START_TIME),

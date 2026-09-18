@@ -257,6 +257,9 @@ class ModelConfigMixin:
                 CONF_SERVICE_DATA_OFF, self.light_params_day.get(CONF_SERVICE_DATA_OFF)
             )
 
+            # Optional night-time block timeout; None means "same as the
+            # controller-level block_timeout" (see effective_block_timeout()).
+            self.night_block_timeout = night_mode.get(CONF_BLOCK_TIMEOUT)
             self.night_mode_entity = night_mode.get(CONF_NIGHT_MODE_ENTITY)
             self.night_mode_entity_states = night_mode.get(
                 CONF_NIGHT_MODE_ENTITY_STATES, []
@@ -482,6 +485,20 @@ class ModelConfigMixin:
             self.sensor_type = config.get(CONF_SENSOR_TYPE)
 
         self.update(sensor_type=self.sensor_type)
+
+    def effective_block_timeout(self):
+        """block_timeout for a block entered right now.
+
+        Evaluated when the controller enters ``blocked`` rather than at
+        activation, because a block can also be entered straight from ``idle``
+        (sensor on while the light is already on by hand), where no activation
+        parameters were prepared. Night mode with its own ``block_timeout``
+        wins while night is active; otherwise the controller-level value.
+        """
+        night_value = getattr(self, "night_block_timeout", None)
+        if night_value is not None and self.night_mode is not None and self.is_night():
+            return night_value
+        return self.block_timeout
 
     def prepare_service_data(self):
         """
