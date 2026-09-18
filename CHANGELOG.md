@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.16.0"></a>
+## [9.16.0](https://github.com/WimImmelman/entity-controller/compare/v9.15.0...v9.16.0) (2026-09-18)
+
+
+### Features
+
+* **Card visual editor** – `entity-controller-card` now provides `getConfigElement()`, so the dashboard's "Add card" dialog shows a form instead of the YAML editor: a layout dropdown (one controller in detail / compact list), an entity picker limited to `entity_controller.*` (multi-select in list mode), name or title, and the two show toggles. The editor renders HA's own `ha-form` and loads the editor bundle on demand through `loadCardHelpers()`. Per-entity names in list mode remain YAML only and survive edits in the form.
+* **Readable fallback names** – A controller without a configured `friendly_name` reports its YAML key as the friendly name; the card now shows a humanised form instead (`auto_playroom_light` → "Playroom light").
+
+### Bug Fixes
+
+* **`start_time` / `end_time` attributes at startup** – `config_times()` now publishes the next window edges as soon as they are computed. They used to appear only after the first start- or end-time callback, so a controller that started outside its window showed "Outside the active window" on the card with no opening time until the next day.
+
+### Tests
+
+* `TestFrontend.test_config_times_publishes_window_edges`: the attributes are set at configuration time to the futurised start and end.
+
 <a name="9.15.0"></a>
 ## [9.15.0](https://github.com/WimImmelman/entity-controller/compare/v9.14.0...v9.15.0) (2026-09-18)
 
