@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.15.0"></a>
+## [9.15.0](https://github.com/WimImmelman/entity-controller/compare/v9.14.0...v9.15.0) (2026-09-18)
+
+
+### Features
+
+* **Dashboard card** – `custom:entity-controller-card`, a plain web component (`www/entity-controller-card.js`, no build step) bundled with the integration. `frontend.py` serves `www/` at `/entity_controller_frontend/` (`async_register_static_paths`, falling back to `register_static_path` on older HA) and, once HA has started, adds or re-versions the card in the storage-mode dashboard resources (`?v=<version>` cache busting); in YAML resource mode it logs the URL to add by hand. Detail mode (`entity:`) shows the state chip, delay and window, per-state lines with live one-second countdowns (switch-off, block timeout, graceful run-out, next window opening), the sensor / hold / forced / light / override entities with on/off dots, and Activate (idle, blocked) / Clear block (blocked) / Block (active_timer) buttons, plus an info icon in the header that opens the more-info dialog. List mode (`entities:`) shows one compact row per controller sorted by state. A banner shows on every card while `switch.entity_controller` is off.
+* **Entity list attributes** – Controllers now publish `sensor_entities`, `hold_sensor_entities`, `forced_sensor_entities`, `control_entities`, `state_entities` and `override_entities` as attributes after startup (the first four were listed in `PERSISTED_STATE_ATTRIBUTES` since the original project but never set).
+
+### Tests
+
+* `TestFrontend` (8 tests): resource URL carries the version; static path registered through the new or the old API; resource created when missing, re-versioned when the version differs, left alone when current; skipped with a warning in YAML resource mode or when lovelace is not loaded; resource registration deferred to `EVENT_HOMEASSISTANT_STARTED` when HA is still starting; `startup_delay_callback` publishes the entity list attributes.
+
 <a name="9.14.0"></a>
 ## [9.14.0](https://github.com/WimImmelman/entity-controller/compare/v9.13.2...v9.14.0) (2026-09-18)
 
