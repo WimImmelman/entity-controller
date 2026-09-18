@@ -129,3 +129,10 @@ CONF_GRACEFUL_OFF = "graceful_off"
 
 
 CONTEXT_ID_CHARACTER_LIMIT = 26
+
+# Global switch (switch.entity_controller): one entity the integration creates
+# itself. OFF puts every controller into `overridden`, ON releases them.
+DATA_ENABLED = "enabled"                       # key in hass.data[DOMAIN]
+GLOBAL_SWITCH_NAME = "Entity Controller"
+GLOBAL_SWITCH_UNIQUE_ID = "entity_controller_global_enabled"
+GLOBAL_SWITCH_ENTITY_ID = "switch.entity_controller"  # what overridden_by shows

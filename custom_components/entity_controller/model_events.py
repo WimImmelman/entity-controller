@@ -24,6 +24,7 @@ from homeassistant.core import callback
 from homeassistant.helpers import event
 
 from .const import (
+    GLOBAL_SWITCH_ENTITY_ID,
     CONF_SENSOR_RESETS_TIMER,
 )
 
@@ -220,6 +221,29 @@ class ModelEventsMixin:
             and self.is_overridden()
         ):
             self.set_context(new.context)
+            self.enable()
+
+    def global_enabled_changed(self, enabled):
+        """switch.entity_controller flipped; mirror override_state_change().
+
+        OFF overrides a running controller (idle/active/blocked), exactly like an
+        override entity turning on; constrained and pending controllers are left
+        alone because their own start-time / startup evaluation consults
+        is_override_state_on(). ON releases an overridden controller unless a
+        YAML override entity still holds it.
+        """
+        if getattr(self, "_torn_down", False):
+            return
+        self.log.debug("global_enabled_changed :: enabled=%s, state=%s", enabled, self.state)
+        if not enabled:
+            if self.is_active() or self.is_active_timer() or self.is_idle() or self.is_blocked():
+                self.set_context(None)
+                self.update(overridden_by=GLOBAL_SWITCH_ENTITY_ID)
+                self.override()
+                self.update(overridden_at=str(datetime.now()))
+            return
+        if self.is_overridden() and self.is_override_state_off():
+            self.set_context(None)
             self.enable()
 
     @callback

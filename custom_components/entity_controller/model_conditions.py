@@ -21,6 +21,9 @@ from datetime import datetime
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
+    DATA_ENABLED,
+    GLOBAL_SWITCH_ENTITY_ID,
     CONF_START_TIME,
     CONF_END_TIME,
     SENSOR_TYPE_DURATION,
@@ -35,7 +38,19 @@ class ModelConditionsMixin:
     Mixed into :class:`Model`; every method works on the shared model state.
     """
 
+    def is_globally_enabled(self):
+        """State of switch.entity_controller (True when the switch does not exist yet)."""
+        data = getattr(self.hass, "data", None)
+        try:
+            enabled = data.get(DOMAIN, {}).get(DATA_ENABLED, True)
+        except AttributeError:
+            return True
+        return enabled is not False
+
     def _override_entity_state(self):
+        if not self.is_globally_enabled():
+            self.log.debug("Override: %s is off", GLOBAL_SWITCH_ENTITY_ID)
+            return GLOBAL_SWITCH_ENTITY_ID
         for e in self.overrideEntities:
             s = self.hass.states.get(e)
             try:

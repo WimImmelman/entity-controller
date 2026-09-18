@@ -2178,12 +2178,234 @@ class TestReloadService:
         hass = _make_hass()
         hass.data = {}
         create = AsyncMock(return_value=[])
+        load_platform = AsyncMock()
         with patch("custom_components.entity_controller.EntityComponent"), patch(
             "custom_components.entity_controller._async_create_controllers", new=create
-        ):
+        ), patch("custom_components.entity_controller.async_load_platform", new=load_platform):
             assert asyncio.run(async_setup(hass, {DOMAIN: []})) is True
         create.assert_awaited_once()
         assert create.await_args.args[2] == 70  # STARTUP_DELAY for the real start
         domains_services = [(c.args[0], c.args[1]) for c in hass.services.async_register.call_args_list]
         assert (DOMAIN, "reload") in domains_services
-        assert set(hass.data[DOMAIN]) == {"component", "machine", "devices"}
+        assert set(hass.data[DOMAIN]) == {"component", "machine", "devices", "enabled"}
+        assert hass.data[DOMAIN]["enabled"] is True
+        # the global switch platform is scheduled: (hass, "switch", DOMAIN, {}, config)
+        hass.async_create_task.assert_called()
+        load_platform.assert_called_once()
+        assert load_platform.call_args.args[1:3] == ("switch", DOMAIN)
+
+
+# ---------------------------------------------------------------------------
+# Global switch (switch.entity_controller)
+# ---------------------------------------------------------------------------
+
+def _switch_model(enabled=True, light_on=False, sensor_on=False):
+    """Model whose hass.data carries the global flag and whose light/sensor are controllable."""
+    from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+    m = _build_model()
+    m.hass.data = {DOMAIN: {DATA_ENABLED: enabled, "devices": []}}
+    m.stateEntities = ["light.test"]
+    m.controlEntities = ["light.test"]
+    m.turn_off_control_entities = MagicMock()
+    m.turn_on_control_entities = MagicMock()
+    m._light = "on" if light_on else "off"
+    m._sensor = "on" if sensor_on else "off"
+
+    def _get(eid):
+        st = MagicMock()
+        st.state = m._light if eid == "light.test" else m._sensor
+        return st
+    m.hass.states.get = MagicMock(side_effect=_get)
+    m.entity.attributes = {}
+    m.entity.set_attr = lambda k, v: m.entity.attributes.__setitem__(k, v)
+    return m
+
+
+def _disable(m):
+    from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+    m.hass.data[DOMAIN][DATA_ENABLED] = False
+    m.global_enabled_changed(False)
+
+
+def _enable(m):
+    from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+    m.hass.data[DOMAIN][DATA_ENABLED] = True
+    m.global_enabled_changed(True)
+
+
+class TestGlobalSwitch:
+
+    def test_globally_enabled_reads_flag(self):
+        m = _switch_model(enabled=True)
+        assert m.is_globally_enabled() is True
+        m = _switch_model(enabled=False)
+        assert m.is_globally_enabled() is False
+
+    def test_globally_enabled_defaults_when_flag_or_data_missing(self):
+        from custom_components.entity_controller.const import DOMAIN
+        m = _switch_model()
+        m.hass.data = {DOMAIN: {}}
+        assert m.is_globally_enabled() is True
+        m.hass.data = {}
+        assert m.is_globally_enabled() is True
+        m.hass.data = None
+        assert m.is_globally_enabled() is True
+
+    def test_override_state_reports_switch_when_disabled(self):
+        from custom_components.entity_controller.const import GLOBAL_SWITCH_ENTITY_ID
+        m = _switch_model(enabled=False)
+        assert m.overrideEntities == []
+        assert m._override_entity_state() == GLOBAL_SWITCH_ENTITY_ID
+        assert m.is_override_state_on() is True
+        assert m.is_override_state_off() is False
+
+    def test_override_state_still_evaluates_yaml_entities_when_enabled(self):
+        m = _switch_model(enabled=True)
+        assert m._override_entity_state() is None
+        m.overrideEntities = ["input_boolean.sleep"]
+        st = MagicMock()
+        st.state = "on"
+        m.hass.states.get = MagicMock(return_value=st)
+        assert m._override_entity_state() == "input_boolean.sleep"
+
+    def test_disable_overrides_from_idle(self):
+        from custom_components.entity_controller.const import GLOBAL_SWITCH_ENTITY_ID
+        m = _switch_model()
+        assert m.state == "idle"
+        _disable(m)
+        assert m.state == "overridden"
+        assert m.entity.attributes["overridden_by"] == GLOBAL_SWITCH_ENTITY_ID
+        assert "overridden_at" in m.entity.attributes
+
+    def test_disable_overrides_from_active_timer(self):
+        m = _switch_model(sensor_on=True)
+        m.sensor_on()
+        assert m.state == "active_timer"
+        _disable(m)
+        assert m.state == "overridden"
+
+    def test_disable_overrides_from_blocked(self):
+        m = _switch_model(light_on=True, sensor_on=True)
+        m.sensor_on()
+        assert m.state == "blocked"
+        _disable(m)
+        assert m.state == "overridden"
+
+    def test_disable_leaves_constrained_and_pending_alone(self):
+        m = _switch_model()
+        m.constrain()
+        assert m.state == "constrained"
+        _disable(m)
+        assert m.state == "constrained"
+        m2 = _switch_model()
+        m2.to_pending()
+        _disable(m2)
+        assert m2.state == "pending"
+
+    def test_enable_releases_to_idle(self):
+        m = _switch_model()
+        _disable(m)
+        assert m.state == "overridden"
+        _enable(m)
+        assert m.state == "idle"
+
+    def test_enable_keeps_override_while_yaml_override_is_on(self):
+        m = _switch_model()
+        _disable(m)
+        m.overrideEntities = ["input_boolean.sleep"]
+        st = MagicMock()
+        st.state = "on"
+        m.hass.states.get = MagicMock(return_value=st)
+        _enable(m)
+        assert m.state == "overridden"
+
+    def test_enable_is_noop_when_not_overridden_or_torn_down(self):
+        m = _switch_model()
+        _enable(m)  # idle stays idle
+        assert m.state == "idle"
+        m._torn_down = True
+        _disable(m)
+        assert m.state == "idle"
+
+    def test_startup_with_switch_off_lands_in_overridden(self):
+        """No YAML override entity at all: the switch alone must override at startup."""
+        m = _switch_model(enabled=False)
+        m.to_pending()
+        for name in (
+            "config_static_strings", "config_control_entities", "config_state_entities",
+            "config_sensor_entities", "config_hold_sensor_entities",
+            "config_forced_sensor_entities", "config_event_sensors",
+            "config_override_entities", "config_lux_constraint",
+            "config_transition_behaviours", "config_off_entities", "config_on_entities",
+            "config_normal_mode", "config_night_mode", "config_state_attributes_ignore",
+            "config_times", "config_other", "prepare_service_data",
+        ):
+            setattr(m, name, MagicMock())
+        m._async_restore_state = AsyncMock(return_value=False)
+        m.hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
+        with patch("custom_components.entity_controller.model.Store"):
+            asyncio.run(m.startup_delay_callback(None))
+        assert m.state == "overridden"
+
+    def test_restore_overridden_with_switch_off(self):
+        m = _switch_model(enabled=False)
+        m.to_pending()
+        store = AsyncMock()
+        store.async_load = AsyncMock(return_value={"state": "overridden", "saved_at": "x"})
+        m._store = store
+        assert asyncio.run(m._async_restore_state()) is True
+        assert m.state == "overridden"
+
+    def test_set_global_enabled_stores_flag_and_notifies_models(self):
+        from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+        from custom_components.entity_controller.switch import set_global_enabled
+        hass = _make_hass()
+        devs = [MagicMock(), MagicMock(), MagicMock(model=None)]
+        hass.data = {DOMAIN: {"devices": devs, DATA_ENABLED: True}}
+        set_global_enabled(hass, False)
+        assert hass.data[DOMAIN][DATA_ENABLED] is False
+        devs[0].model.global_enabled_changed.assert_called_once_with(False)
+        devs[1].model.global_enabled_changed.assert_called_once_with(False)
+
+    def test_switch_entity_restores_last_state(self):
+        from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+        from custom_components.entity_controller.switch import EntityControllerGlobalSwitch
+        for last, expected in ((None, True), ("on", True), ("off", False)):
+            hass = _make_hass()
+            hass.data = {DOMAIN: {"devices": [], DATA_ENABLED: True}}
+            sw = EntityControllerGlobalSwitch(hass)
+            last_state = None if last is None else MagicMock(state=last)
+            with patch(
+                "custom_components.entity_controller.switch.RestoreEntity.async_added_to_hass",
+                new=AsyncMock(),
+            ), patch.object(sw, "async_get_last_state", new=AsyncMock(return_value=last_state)):
+                asyncio.run(sw.async_added_to_hass())
+            assert sw.is_on is expected, last
+            assert hass.data[DOMAIN][DATA_ENABLED] is expected, last
+
+    def test_switch_entity_turn_on_off(self):
+        from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+        from custom_components.entity_controller.switch import EntityControllerGlobalSwitch
+        hass = _make_hass()
+        dev = MagicMock()
+        hass.data = {DOMAIN: {"devices": [dev], DATA_ENABLED: True}}
+        sw = EntityControllerGlobalSwitch(hass)
+        sw.async_write_ha_state = MagicMock()
+        asyncio.run(sw.async_turn_off())
+        assert sw.is_on is False
+        assert hass.data[DOMAIN][DATA_ENABLED] is False
+        dev.model.global_enabled_changed.assert_called_with(False)
+        asyncio.run(sw.async_turn_on())
+        assert sw.is_on is True
+        dev.model.global_enabled_changed.assert_called_with(True)
+        assert sw.extra_state_attributes == {"controllers": 1}
+        assert sw.async_write_ha_state.call_count == 2
+
+    def test_switch_platform_setup(self):
+        from custom_components.entity_controller.switch import async_setup_platform, EntityControllerGlobalSwitch
+        add = MagicMock()
+        asyncio.run(async_setup_platform(_make_hass(), {}, add, discovery_info=None))
+        add.assert_not_called()
+        asyncio.run(async_setup_platform(_make_hass(), {}, add, discovery_info={}))
+        (entities,), _ = add.call_args
+        assert isinstance(entities[0], EntityControllerGlobalSwitch)

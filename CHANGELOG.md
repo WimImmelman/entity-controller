@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.14.0"></a>
+## [9.14.0](https://github.com/WimImmelman/entity-controller/compare/v9.13.2...v9.14.0) (2026-09-18)
+
+
+### Features
+
+* **`switch.entity_controller`** – The integration now creates one global switch entity of its own (a `switch` platform loaded through `async_load_platform`, no YAML). OFF overrides every controller: `_override_entity_state()` reports `switch.entity_controller` as the active override, so startup, restore, the start-time evaluation and the `overrides:` machinery all treat it exactly like an override entity that is on. Running controllers are moved to `overridden` immediately through the new `Model.global_enabled_changed()`, which mirrors `override_state_change()`; constrained and pending controllers are left to their own evaluation. ON releases them through the existing `enable()` transitions, and a YAML override entity that is still on keeps its controller overridden. The switch extends `RestoreEntity`, so its state survives restarts, and `entity_controller.reload` does not touch it. The three `len(self.overrideEntities) > 0 and is_override_state_on()` guards lose the length check, which was redundant even before. Replaces the hand-built `input_boolean` + inverting template sensor + sixteen `overrides:` lines in the maintainer's config.
+
+### Tests
+
+* `TestGlobalSwitch` (17 tests): `is_globally_enabled()` reads `hass.data` and defaults to enabled when the flag or `hass.data` is missing; `_override_entity_state()` returns the switch id when disabled and still evaluates YAML entities when enabled; `global_enabled_changed(False)` overrides from `idle`, `active_timer` and `blocked` and leaves `constrained` and `pending` alone; `global_enabled_changed(True)` releases to `idle`, keeps a controller overridden while a YAML override is on, and is a no-op after teardown; startup with the switch off lands in `overridden` without any YAML override entity; restoring `overridden` with the switch off succeeds; `set_global_enabled()` stores the flag and notifies every model; the switch entity restores OFF/ON/missing last state, and `async_setup` loads the switch platform.
+
 <a name="9.13.2"></a>
 ## [9.13.2](https://github.com/WimImmelman/entity-controller/compare/v9.13.1...v9.13.2) (2026-09-18)
 

@@ -121,8 +121,7 @@ class ModelTimeWindowsMixin:
             # has had its chance, so they must keep the original behaviour.
             if (
                 self.is_constrained()
-                and len(self.overrideEntities) > 0
-                and self.is_override_state_on()
+                and self.is_override_state_on()  # YAML override entities or the global switch
             ):
                 self.update(overridden_by=self._override_entity_state())
                 self.enable()

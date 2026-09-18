@@ -236,7 +236,7 @@ class Model(
         restored = await self._async_restore_state()
 
         if not restored:
-            if len(self.overrideEntities) > 0 and self.is_override_state_on():
+            if self.is_override_state_on():  # YAML override entities or the global switch
                 self.override()
                 self.update(overridden_at=str(datetime.now()))
             else:

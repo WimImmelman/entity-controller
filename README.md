@@ -21,7 +21,7 @@ motion_light:
 ## Lineage
 - **Daniel Mason ([danobot](https://github.com/danobot))** wrote Entity Controller and maintained it to v9.7.6 (2024).
 - **[pluskal](https://github.com/pluskal/entity-controller)** added, in 2026, state persistence with timer run-out across restarts, forced/event/hold sensors, the lux constraint, entity-driven night mode, `grace_period`, and a series of state-machine fixes (v9.8.0 to v9.11.1).
-- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0), the `entity_controller.reload` service (v9.13.0) and repository housekeeping.
+- **This fork** continues from pluskal's v9.11.1 with `graceful_off` (v9.12.0), the `entity_controller.reload` service (v9.13.0), the global `switch.entity_controller` (v9.14.0) and repository housekeeping.
 
 Licensed under the GPL-3.0, as the original. See [COPYING](COPYING).
 
@@ -179,6 +179,28 @@ entity_controller:
 
 **When to use it:** Only needed for integrations where state-change events arrive with a context unrelated to the original EC service call (cloud integrations, gateway bridges, etc.). Standard local integrations — where HA propagates the service-call context through to the state-change event — are handled correctly by the existing context check and do not need this option.
 
+
+## Global switch (`switch.entity_controller`)
+
+**Problem:** An "automatic lighting on/off" master control had to be built by hand: an `input_boolean`, a template sensor that inverts it (EC overrides are *on* when they override), and an `overrides:` line on every single controller. Forget the line on a new controller and it ignores the master switch.
+
+**Solution:** The integration creates one switch entity itself, `switch.entity_controller`. It exists whatever the YAML says and needs no configuration.
+
+| State | Effect |
+|-------|--------|
+| `on` (default) | Normal operation. |
+| `off` | Every controller behaves as if an override entity were on: running controllers move to `overridden` (a `graceful_off` timer still switches its light off), constrained ones go to `overridden` instead of `idle` when their window opens, and controllers starting up land in `overridden`. `overridden_by` shows `switch.entity_controller`. |
+
+Switching back on releases the controllers through the usual override rules: `idle` when the light is off, `active` when the light is on and a sensor still sees motion, and a YAML override entity that is still on keeps its controller overridden. The switch state survives restarts (it is restored from HA's last-state store) and is not touched by `entity_controller.reload`. The attribute `controllers` shows how many controllers exist.
+
+```yaml
+# Dashboard button: master control for all controllers
+type: button
+entity: switch.entity_controller
+name: Auto lights
+```
+
+`overrides:` remains available for entity-driven overrides (a sleep-mode boolean, a presence sensor); the global switch replaces the emergency-stop use, not the option.
 
 ## Reload service (`entity_controller.reload`)
 

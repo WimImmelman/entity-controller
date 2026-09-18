@@ -20,7 +20,7 @@ Entity controller component for Home Assistant.
 Maintainer:       Wim Immelman (this fork)
 Original author:  Daniel Mason (github.com/danobot/entity-controller)
 Fork lineage:     github.com/pluskal/entity-controller (2026 features and fixes)
-Version:          v9.13.2
+Version:          v9.14.0
 Project Page:     https://github.com/WimImmelman/entity-controller
 Documentation:    https://github.com/WimImmelman/entity-controller/blob/main/README.md
 """
@@ -30,6 +30,7 @@ from datetime import datetime
 
 from homeassistant.const import SERVICE_RELOAD
 from homeassistant.helpers import event  # noqa: F401 - tests patch event.async_* through this package
+from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.reload import async_integration_yaml_config
 from homeassistant.util import dt
@@ -41,6 +42,7 @@ from .schema import MODE_SCHEMA, ENTITY_SCHEMA, PLATFORM_SCHEMA
 from .state_machine import build_machine
 from .const import (
     DOMAIN,
+    DATA_ENABLED,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +50,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DEPENDENCIES = ["light", "sensor", "binary_sensor", "cover", "fan", "media_player"]
 
-VERSION = '9.13.2'
+VERSION = '9.14.0'
 
 # A reload happens on a running HA where every entity is already known, so the
 # rebuilt controllers only need a moment for their entities to be registered.
@@ -92,9 +94,14 @@ async def async_setup(hass, config):
         "component": component,
         "machine": machine,
         "devices": [],
+        DATA_ENABLED: True,  # switch.entity_controller restores its own state once it is added
     }
 
     await _async_create_controllers(hass, config[DOMAIN], STARTUP_DELAY)
+
+    # The global switch lives in its own platform; the integration loads it so
+    # it exists without any YAML and survives entity_controller.reload.
+    hass.async_create_task(async_load_platform(hass, "switch", DOMAIN, {}, config))
 
     async def _async_handle_reload(call):
         await async_reload(hass)

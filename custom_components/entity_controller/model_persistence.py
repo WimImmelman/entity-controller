@@ -114,7 +114,7 @@ class ModelPersistenceMixin:
             # Only restore overridden if an override entity is actually on, so
             # we do not get stuck in overridden when the override cleared while HA
             # was stopped.
-            if len(self.overrideEntities) > 0 and self.is_override_state_on():
+            if self.is_override_state_on():  # YAML override entities or the global switch
                 self.override()
                 self.update(overridden_at=str(datetime.now()), notes="Restored from storage")
                 return True
