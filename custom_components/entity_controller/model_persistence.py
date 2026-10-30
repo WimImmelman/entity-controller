@@ -2,13 +2,16 @@
 """Saving and restoring state across restarts and reloads (HA storage). Part of Model."""
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.core import callback
 from homeassistant.helpers import event
+from homeassistant.util import dt as dt_util
 
 from .const import (
     STORAGE_KEY_PREFIX,
+    DEFAULT_DELAY,
+    CONF_DELAY,
 )
 
 
@@ -153,6 +156,17 @@ class ModelPersistenceMixin:
                 # automation) — there is nothing to finish.
                 return False
             remaining = (expiry - datetime.now()).total_seconds()
+            if remaining <= 1 and self._duration_sensor_hold_until() is not None:
+                # A duration sensor is still on (or went off less than 'delay'
+                # ago), so the saved expiry is stale: the timer had run out into
+                # "pending sensor" and kept its old time. Let
+                # _restore_timer_finish wait for the sensor instead.
+                self._pending_restore_expiry = expiry
+                self.log.info(
+                    "_async_restore_state :: Saved timer ran out but a duration sensor still holds the light, "
+                    "deferring the run-out")
+                self._track(event.async_call_later(self.hass, 30, self._restore_timer_finish))
+                return False
             if remaining <= 1:
                 # NOTE: start_monitoring() may only be called here, where we
                 # return True. The other branch returns False and the caller
@@ -227,6 +241,16 @@ class ModelPersistenceMixin:
             self._pending_restore_is_graceful = False
             self.log.debug("_restore_timer_finish :: The light is no longer on, doing nothing")
             return
+        # With a duration sensor the saved expiry only covers the time before the
+        # sensor took over: once the timer runs out into "pending sensor" the old
+        # expiry stays behind. Wim office, 2026-10-30 13:28: the PC-activity
+        # sensor was on all along, but the 12:39 expiry carried over a restart
+        # switched the light off. Hold the run-out while a sensor is on, and
+        # until 'delay' after it last went off. A graceful-off run-out belongs to
+        # overridden/constrained, where the sensors do not count.
+        held_until = None if self._pending_restore_is_graceful else self._duration_sensor_hold_until()
+        if held_until is not None and held_until > expiry:
+            expiry = self._pending_restore_expiry = held_until
         # The entity is available and on. If the timer has not run out yet
         # (typically when we got here from the deferred decision after 30 s),
         # wait exactly the remaining time — otherwise we would turn off earlier
@@ -242,6 +266,32 @@ class ModelPersistenceMixin:
         self.log.info("_restore_timer_finish :: Turning control entities off (timer from before restart)")
         self.turn_off_control_entities()
         self.update(notes="Turned off by timer carried over the restart")
+
+    def _duration_sensor_hold_until(self):
+        """Earliest time a carried-over run-out may finish because of the sensors.
+
+        None for event sensors, or when no sensor has been on within 'delay'.
+        While a sensor is on this is now + delay, so the run-out re-checks then.
+        """
+        if not self.is_duration_sensor():
+            return None
+        delay = timedelta(seconds=self.lightParams.get(CONF_DELAY, DEFAULT_DELAY))
+        if self.is_sensor_on():
+            return datetime.now() + delay
+        # Measure the time since the sensor went off in UTC: last_changed is
+        # aware, and the naive local time EC uses elsewhere need not share HA's
+        # time zone.
+        off_for = None
+        for e in list(self.sensorEntities) + list(getattr(self, "holdSensorEntities", [])):
+            s = self.hass.states.get(e)
+            if s is None or s.state in ("unavailable", "unknown"):
+                continue
+            elapsed = dt_util.utcnow() - s.last_changed
+            if off_for is None or elapsed < off_for:
+                off_for = elapsed
+        if off_for is None or off_for >= delay:
+            return None
+        return datetime.now() + (delay - off_for)
 
     def _state_entities_unavailable(self):
         """True when at least one controlled/state entity is not available yet."""

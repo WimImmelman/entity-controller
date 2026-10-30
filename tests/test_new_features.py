@@ -1934,6 +1934,95 @@ class TestGracefulOff:
         assert m._pending_restore_expiry is None
 
 
+class TestRestoreHeldByDurationSensor:
+    """A carried-over run-out must not beat a duration sensor that still holds the light.
+
+    Wim office, 2026-10-30: the PC-activity sensor was on from 12:24, the timer
+    ran out into "pending sensor" at 12:39 but kept that expiry, and after the
+    13:27 restart the stale expiry switched the light off at 13:28.
+    """
+
+    def _model(self, sensor_on, sensor_off_ago=None, sensor_type="duration"):
+        from datetime import timedelta, timezone
+        m = _build_model()
+        m.sensor_type = sensor_type
+        m.stateEntities = ["light.test"]
+        m.controlEntities = ["light.test"]
+        m.turn_off_control_entities = MagicMock()
+        m.lightParams = {"delay": 900, "service_data": None, "service_data_off": None}
+        off_ago = sensor_off_ago if sensor_off_ago is not None else 86400
+        sensor_changed = datetime.now(timezone.utc) - timedelta(seconds=off_ago)
+
+        def _get(eid):
+            st = MagicMock()
+            if eid == "light.test":
+                st.state = "on"
+            else:
+                st.state = "on" if sensor_on else "off"
+                st.last_changed = sensor_changed
+            return st
+        m.hass.states.get = MagicMock(side_effect=_get)
+        return m
+
+    def _stale(self):
+        from datetime import timedelta
+        return datetime.now() - timedelta(minutes=49)
+
+    def test_finish_waits_while_sensor_is_on(self):
+        m = self._model(sensor_on=True)
+        m._pending_restore_expiry = self._stale()
+        with patch("custom_components.entity_controller.event.async_call_later") as later:
+            m._restore_timer_finish()
+        m.turn_off_control_entities.assert_not_called()
+        delay = later.call_args.args[1]
+        assert 890 < delay <= 900
+        assert m._pending_restore_expiry > datetime.now()
+
+    def test_finish_waits_out_delay_after_sensor_went_off(self):
+        m = self._model(sensor_on=False, sensor_off_ago=300)
+        m._pending_restore_expiry = self._stale()
+        with patch("custom_components.entity_controller.event.async_call_later") as later:
+            m._restore_timer_finish()
+        m.turn_off_control_entities.assert_not_called()
+        delay = later.call_args.args[1]
+        assert 590 < delay <= 600
+
+    def test_finish_turns_off_once_sensor_is_off_longer_than_delay(self):
+        m = self._model(sensor_on=False, sensor_off_ago=1000)
+        m._pending_restore_expiry = self._stale()
+        m._restore_timer_finish()
+        m.turn_off_control_entities.assert_called_once()
+        assert m._pending_restore_expiry is None
+
+    def test_event_sensor_keeps_saved_expiry(self):
+        m = self._model(sensor_on=True, sensor_type="event")
+        m._pending_restore_expiry = self._stale()
+        m._restore_timer_finish()
+        m.turn_off_control_entities.assert_called_once()
+
+    def test_restore_defers_stale_expiry_while_sensor_is_on(self):
+        m = self._model(sensor_on=True)
+        m._store = MagicMock()
+        m._store.async_load = AsyncMock(return_value={
+            "state": "active_timer", "saved_at": "x", "expires_at": str(self._stale())})
+        with patch("custom_components.entity_controller.event.async_call_later") as later:
+            restored = asyncio.run(m._async_restore_state())
+        assert restored is False
+        m.turn_off_control_entities.assert_not_called()
+        later.assert_called_once()
+        assert m._pending_restore_expiry is not None
+
+    def test_restore_still_turns_off_expired_timer_when_sensor_idle(self):
+        m = self._model(sensor_on=False, sensor_off_ago=3000)
+        m.to_pending()  # as at startup: _build_model already started monitoring
+        m._store = MagicMock()
+        m._store.async_load = AsyncMock(return_value={
+            "state": "active_timer", "saved_at": "x", "expires_at": str(self._stale())})
+        restored = asyncio.run(m._async_restore_state())
+        assert restored is True
+        m.turn_off_control_entities.assert_called()  # idle entry plus the run-out itself
+
+
 # ---------------------------------------------------------------------------
 # Reload service (entity_controller.reload)
 # ---------------------------------------------------------------------------
