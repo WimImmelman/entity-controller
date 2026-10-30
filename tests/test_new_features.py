@@ -2023,6 +2023,64 @@ class TestRestoreHeldByDurationSensor:
         m.turn_off_control_entities.assert_called()  # idle entry plus the run-out itself
 
 
+class TestStartupWithLitLightAndSensorOn:
+    """Startup/reload must not switch off a light while someone is in the room.
+
+    Wim office, 2026-10-30 13:59: entity_controller.reload rebuilt the controller,
+    it entered idle and idle's 'off' behaviour switched the light off although
+    the presence and PC sensors were on.
+    """
+
+    def _model(self, light_on, sensor_on):
+        m = _build_model()
+        m.to_pending()  # as at startup: _build_model already started monitoring
+        m.stateEntities = ["light.test"]
+        m.controlEntities = ["light.test"]
+        m.turn_off_control_entities = MagicMock()
+        m.turn_on_control_entities = MagicMock()
+        m.is_state_entities_on = MagicMock(return_value=light_on)
+        m.is_state_entities_off = MagicMock(return_value=not light_on)
+        m.is_sensor_on = MagicMock(return_value=sensor_on)
+        m.is_override_state_on = MagicMock(return_value=False)
+        for name in (
+            "config_static_strings", "config_control_entities", "config_state_entities",
+            "config_sensor_entities", "config_hold_sensor_entities",
+            "config_forced_sensor_entities", "config_event_sensors",
+            "config_override_entities", "config_lux_constraint",
+            "config_transition_behaviours", "config_off_entities", "config_on_entities",
+            "config_normal_mode", "config_night_mode", "config_state_attributes_ignore",
+            "config_times", "config_other", "prepare_service_data",
+        ):
+            setattr(m, name, MagicMock())
+        m._async_restore_state = AsyncMock(return_value=False)
+        m.hass.bus.async_listen_once = MagicMock(return_value=lambda: None)
+        return m
+
+    def _start(self, m):
+        with patch("custom_components.entity_controller.model.Store"):
+            asyncio.run(m.startup_delay_callback(None))
+
+    def test_takes_control_instead_of_switching_off(self):
+        m = self._model(light_on=True, sensor_on=True)
+        self._start(m)
+        assert m.state == "active_timer"
+        m.turn_off_control_entities.assert_not_called()
+        m._start_timer.assert_called()
+        assert m._restoring is False
+
+    def test_lit_light_with_empty_room_still_switches_off(self):
+        m = self._model(light_on=True, sensor_on=False)
+        self._start(m)
+        assert m.state == "idle"
+        m.turn_off_control_entities.assert_called_once()
+
+    def test_dark_room_with_sensor_on_just_starts_idle(self):
+        m = self._model(light_on=False, sensor_on=True)
+        self._start(m)
+        assert m.state == "idle"
+        m.turn_on_control_entities.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Reload service (entity_controller.reload)
 # ---------------------------------------------------------------------------

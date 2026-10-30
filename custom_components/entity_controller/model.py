@@ -225,6 +225,18 @@ class Model(
             if self.is_override_state_on():  # YAML override entities or the global switch
                 self.override()
                 self.update(overridden_at=str(datetime.now()))
+            elif self.is_state_entities_on() and self.is_sensor_on():
+                # Someone is in the room and the light is on: take control
+                # instead of letting idle's entry behaviour switch it off. Wim
+                # office, 2026-10-30 13:59: an entity_controller.reload turned
+                # the light off while the presence and PC sensors were on.
+                self._restoring = True
+                try:
+                    self.start_monitoring()
+                finally:
+                    self._restoring = False
+                self.activate()
+                self.update(notes="Light and sensor on at startup, took control")
             else:
                 self.start_monitoring()
 
