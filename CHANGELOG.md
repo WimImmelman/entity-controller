@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.17.2"></a>
+## [9.17.2](https://github.com/WimImmelman/entity-controller/compare/v9.17.1...v9.17.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **Restart restore with duration sensors** – Once the off-timer ran out into "pending sensor" it kept its old expiry, and that stale time was persisted. After an HA restart the restore saw an overdue timer and switched the light off although a duration sensor was still on. `_duration_sensor_hold_until()` now holds the carried-over run-out while any sensor is on and until `delay` after the last one went off; event sensors and graceful-off run-outs keep the saved expiry.
+
+### Tests
+
+* `TestRestoreHeldByDurationSensor` (6 tests): the run-out waits while the sensor is on, waits out the rest of `delay` after it went off, turns off once the sensor has been off longer than `delay`, event sensors keep the saved expiry, and the startup restore defers a stale expiry while the sensor is on but still finishes it when the sensor is idle.
+
 <a name="9.17.1"></a>
 ## [9.17.1](https://github.com/WimImmelman/entity-controller/compare/v9.17.0...v9.17.1) (2026-09-18)
 
