@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.17.3"></a>
+## [9.17.3](https://github.com/WimImmelman/entity-controller/compare/v9.17.2...v9.17.3) (2026-10-30)
+
+
+### Bug Fixes
+
+* **Startup and reload with someone in the room** – On HA startup or `entity_controller.reload` the controller entered `idle`, whose default `off` behaviour switched the light off even while a sensor was on. When the light and a sensor are both on, the controller now passes through `idle` without its entry behaviour and activates, so the normal off-timer takes over. A lit light in an empty room is still switched off as before.
+
+### Tests
+
+* `TestStartupWithLitLightAndSensorOn` (3 tests): a lit light with a sensor on ends in `active_timer` without a turn-off, a lit light in an empty room is still switched off, and a dark room with a sensor on starts in `idle` without switching on.
+
 <a name="9.17.2"></a>
 ## [9.17.2](https://github.com/WimImmelman/entity-controller/compare/v9.17.1...v9.17.2) (2026-10-30)
 
