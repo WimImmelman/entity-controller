@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.17.4"></a>
+## [9.17.4](https://github.com/WimImmelman/entity-controller/compare/v9.17.3...v9.17.4) (2026-11-25)
+
+
+### Bug Fixes
+
+* **Global switch ignored after start_time** – While sunset (or sunrise) moves later each day, the start/end callback scheduled from yesterday's sun time fired a minute early and rescheduled itself for later the same day, so it ran twice. With `switch.entity_controller` off the first run correctly moved the controller to `overridden`, but the second run called `enable()` and released it to `idle`, so every sunset-based controller re-armed about a minute after `start_time`. A callback that just fired now schedules its next run for tomorrow when the re-parsed time is less than 12 hours away, and `start_time` leaves an `overridden` controller alone while its override is still on.
+
+### Tests
+
+* `TestFuturizeTimezone` (3 tests): `futurize_after_fire` pushes a time later today to tomorrow, keeps an already-passed time on tomorrow, and keeps tonight's run for a callback that fires just after midnight.
+* `TestStartTimeOverride` (3 tests): a second `start_time` run keeps the controller `overridden` for an override entity and for the global switch, and still releases it to `idle` once the override is off.
+
 <a name="9.17.3"></a>
 ## [9.17.3](https://github.com/WimImmelman/entity-controller/compare/v9.17.2...v9.17.3) (2026-10-30)
 
