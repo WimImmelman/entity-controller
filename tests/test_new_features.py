@@ -1005,6 +1005,41 @@ class TestFuturizeTimezone:
         )
         assert result == dtm(2026, 7, 10, 5, 23, 0)
 
+    def _after_fire_at(self, local_now, timet):
+        from zoneinfo import ZoneInfo
+        import homeassistant.util.dt as dt_util
+        prague = ZoneInfo("Europe/Prague")
+        model = _build_model()
+        previous_tz = dt_util.DEFAULT_TIME_ZONE
+        dt_util.set_default_time_zone(prague)
+        try:
+            with patch(
+                "custom_components.entity_controller.dt.now",
+                return_value=local_now.replace(tzinfo=prague),
+            ):
+                return model.futurize_after_fire(timet)
+        finally:
+            dt_util.set_default_time_zone(previous_tz)
+
+    def test_after_fire_skips_later_today(self):
+        """2026-11-25: fired at 18:36:59 (yesterday's sunset-1h), today's
+        sunset-1h is 18:37:55 -> must go to tomorrow, not fire again today."""
+        from datetime import datetime as dtm, time as tm
+        result = self._after_fire_at(dtm(2026, 11, 25, 18, 36, 59), tm(18, 37, 55))
+        assert result == dtm(2026, 11, 26, 18, 37, 55)
+
+    def test_after_fire_past_time_goes_tomorrow(self):
+        """Sun moving earlier: re-parsed time already passed -> tomorrow (unchanged)."""
+        from datetime import datetime as dtm, time as tm
+        result = self._after_fire_at(dtm(2026, 11, 25, 5, 58, 0), tm(5, 57, 16))
+        assert result == dtm(2026, 11, 26, 5, 57, 16)
+
+    def test_after_fire_late_past_midnight_keeps_tonight(self):
+        """A 23:59:30 callback that fires at 00:00:10 must still fire tonight."""
+        from datetime import datetime as dtm, time as tm
+        result = self._after_fire_at(dtm(2026, 11, 26, 0, 0, 10), tm(23, 59, 30))
+        assert result == dtm(2026, 11, 26, 23, 59, 30)
+
     def test_aware_datetime_input_is_normalized(self):
         from datetime import datetime as dtm
         from zoneinfo import ZoneInfo
@@ -1082,6 +1117,31 @@ class TestStartTimeOverride:
         model = self._prepare("idle", entities_on=True)
         model._apply_start_time_transition()
         assert model.state == "blocked"
+
+    def test_second_start_time_run_keeps_override_entities_off(self):
+        """2026-11-25: the second same-evening start_time run released the
+        override (overridden -> idle) when the controlled lights were off."""
+        model = self._prepare("overridden", entities_on=False)
+        model._apply_start_time_transition()
+        assert model.state == "overridden"
+
+    def test_second_start_time_run_keeps_global_switch_override(self):
+        """Same incident through the real predicate: switch.entity_controller off."""
+        from custom_components.entity_controller.const import DOMAIN, DATA_ENABLED
+        model = _build_model()
+        model.state = "overridden"
+        model.overrideEntities = []
+        model.hass.data = {DOMAIN: {DATA_ENABLED: False}}
+        model.is_state_entities_on = MagicMock(return_value=False)
+        model.is_state_entities_off = MagicMock(return_value=True)
+        model._apply_start_time_transition()
+        assert model.state == "overridden"
+
+    def test_overridden_with_override_released_still_enables(self):
+        """If the override is no longer on, start_time keeps the old release path."""
+        model = self._prepare("overridden", entities_on=False, override_on=False)
+        model._apply_start_time_transition()
+        assert model.state == "idle"
 
     def test_overridden_by_and_at_are_recorded(self):
         """Attributes must match what override_state_change() would have set."""

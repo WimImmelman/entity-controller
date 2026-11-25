@@ -39,7 +39,7 @@ class ModelTimeWindowsMixin:
         # must be reparsed to get up to date sunset/sunrise times
         x = self.parse_time(self.end_time)
 
-        parsed_end = self.futurize(x)
+        parsed_end = self.futurize_after_fire(x)
         self.log.debug("end_time_callback :: New callback set to %s (future)", parsed_end)
         self.end_time_event_hook = event.async_track_point_in_time(
             self.hass, self.end_time_callback, parsed_end
@@ -61,7 +61,7 @@ class ModelTimeWindowsMixin:
         # else:
         x = self.parse_time(self.start_time)
 
-        parsed_start = self.futurize(x)
+        parsed_start = self.futurize_after_fire(x)
         self.log.debug(
             "start_time_callback :: New callback set to %s (future)" % parsed_start
         )
@@ -103,6 +103,20 @@ class ModelTimeWindowsMixin:
             # while already idle/blocked/etc. (see the Phase 4 comment above),
             # and those states are reached only after override_state_change()
             # has had its chance, so they must keep the original behaviour.
+            #
+            # Already overridden (2026-11-25): with the global switch off the
+            # first start_time run moves constrained -> overridden; a second run
+            # (see futurize_after_fire) then fell through to enable(), which
+            # releases overridden -> idle and re-armed every sunset-based
+            # controller ~1 minute after start_time. Releasing an override is
+            # the job of override_state_change()/global_enabled_changed(), so
+            # start_time must leave an active override alone.
+            if self.is_overridden() and self.is_override_state_on():
+                self.log.debug(
+                    "start_time_callback :: still overridden by %s; leaving state unchanged",
+                    self._override_entity_state(),
+                )
+                return
             if (
                 self.is_constrained()
                 and self.is_override_state_on()  # YAML override entities or the global switch
@@ -342,6 +356,24 @@ class ModelTimeWindowsMixin:
                 self.log.debug("Time still happening today. " + str(t))
         # self.log.debug("output time: %s", t)
         # self.log.debug("-------------------- futurize (END) -------------------")
+        return t
+
+    def futurize_after_fire(self, timet):
+        """Next occurrence of a start/end time, for a callback that just fired.
+
+        The callback was scheduled from *yesterday's* sun times. While sunset
+        (or sunrise) is moving later each day, it fires a minute or so before
+        today's re-parsed time, which futurize() then keeps as "later today" —
+        so the callback fired a second time the same evening (observed
+        2026-11-25: every sunset-based controller ran start_time twice, 56 s
+        apart). A callback that just fired has handled today's window, so
+        anything less than 12 hours away is pushed to tomorrow. Times a day
+        away (e.g. a callback that fired late, just after midnight) are kept.
+        """
+        t = self.futurize(timet)
+        now_local = dt.as_local(dt.now()).replace(tzinfo=None)
+        if t - now_local < timedelta(hours=12):
+            t = t + timedelta(days=1)
         return t
 
     def debug_time_wrapper(self, timet):
