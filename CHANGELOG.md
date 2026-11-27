@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.19.0"></a>
+## [9.19.0](https://github.com/WimImmelman/entity-controller/compare/v9.18.0...v9.19.0) (2026-11-27)
+
+
+### Features
+
+* **Card: expandable list rows** – Each row in list mode has a **More info** / **Less** toggle that expands just that row inline with what the detail card shows: the full state lines (timer reset, window close, notes), the sensor and light chips and the Activate / Block / Clear block buttons. `expanded: true` starts every row open; each row can still be collapsed on its own. The visual editor has a switch for it.
+
+### Bug Fixes
+
+* **Card: single click handler** – A card that Home Assistant detached and re-attached registered a second click handler; it is now bound once.
+
 <a name="9.18.0"></a>
 ## [9.18.0](https://github.com/WimImmelman/entity-controller/compare/v9.17.4...v9.18.0) (2026-11-27)
 
