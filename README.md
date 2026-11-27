@@ -238,10 +238,11 @@ entities:
 | `entity` | — | Controller to show in detail. |
 | `entities` | — | List of controllers (entity id, or `{entity, name}`) for the compact list. |
 | `sort_by_state` | `true` | List mode: order rows active → blocked → overridden → idle → constrained. `false` keeps the configured order, which you can drag into shape in the visual editor. |
+| `expanded` | `false` | List mode: every row starts expanded. Each row has a **More info** / **Less** toggle that expands just that row inline with what the detail card shows: the full state lines (timer reset, window close, notes), the sensor and light chips (`show_entities`) and the Activate / Block / Clear block buttons (`show_buttons`). Tapping the rest of a row still opens the more-info dialog. |
 | `show_states` | all | List mode: only list controllers in these states, e.g. `[active_timer, active_stay_on, blocked]` for a wall panel that shows what is running. While none match, the card hides itself (no empty space in a sections view); while `switch.entity_controller` is off it stays visible with the banner. The card editor preview always shows it. |
 | `name` / `title` | friendly name | Card heading. Without one the card uses the controller's `friendly_name`, or a readable form of its YAML key (`auto_playroom_light` → "Playroom light"). |
-| `show_entities` | `true` | Detail card: show the sensor, hold, forced, light and override entities with live on/off dots. |
-| `show_buttons` | `true` | Detail card: Activate (idle, blocked) / Clear block (blocked) / Block (active_timer) buttons; they call the matching `entity_controller.*` services. The info icon in the header and every entity chip open the more-info dialog. |
+| `show_entities` | `true` | Detail card and expanded list rows: show the sensor, hold, forced, light and override entities with live on/off dots. |
+| `show_buttons` | `true` | Detail card and expanded list rows: Activate (idle, blocked) / Clear block (blocked) / Block (active_timer) buttons; they call the matching `entity_controller.*` services. The info icon in the header and every entity chip open the more-info dialog. |
 
 What the card shows depends on the state: `active_timer` shows who triggered it and a live countdown to the switch-off; `blocked` shows what blocked it and when the block clears; `overridden` and `constrained` show the cause, when the window opens next and a pending `graceful_off` run-out; `idle` shows the last trigger and when the window closes. A banner appears on every card while `switch.entity_controller` is off.
 

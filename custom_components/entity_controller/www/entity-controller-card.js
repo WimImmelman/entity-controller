@@ -15,7 +15,8 @@
 // sort_by_state (list mode, default true; false keeps the configured order),
 // show_states (list mode: only list controllers in these states, e.g.
 // [active_timer, blocked]; the card hides itself while none match and
-// switch.entity_controller is on).
+// switch.entity_controller is on), expanded (list mode, default false: every
+// row starts expanded; each row's "More info" / "Less" toggle flips it).
 
 const CARD_TYPE = "entity-controller-card";
 const GLOBAL_SWITCH = "switch.entity_controller";
@@ -132,8 +133,14 @@ class EntityControllerCard extends HTMLElement {
     this._list = Array.isArray(config.entities)
       ? config.entities.map((e) => (typeof e === "string" ? { entity: e } : e))
       : null;
+    // rows the user flipped away from the `expanded` default (open when collapsed by default, and vice versa)
+    this._flipped = new Set();
     this._rendered = "";
     if (this._hass) this._render();
+  }
+
+  _isOpen(entityId) {
+    return (this._config.expanded === true) !== this._flipped.has(entityId);
   }
 
   set hass(hass) {
@@ -147,7 +154,12 @@ class EntityControllerCard extends HTMLElement {
 
   connectedCallback() {
     this._tick = setInterval(() => this._updateCountdowns(), 1000);
-    this.addEventListener("click", (ev) => this._onClick(ev));
+    // once only: a card that is detached and re-attached (layout changes,
+    // visibility) must not end up with two click handlers
+    if (!this._clickBound) {
+      this._clickBound = true;
+      this.addEventListener("click", (ev) => this._onClick(ev));
+    }
   }
 
   disconnectedCallback() {
@@ -214,15 +226,7 @@ class EntityControllerCard extends HTMLElement {
       entities = this._entityRows(a);
     }
 
-    let buttons = "";
-    if (this._config.show_buttons) {
-      const b = [];
-      // idle and blocked are the only states with an `activate` transition
-      if (["idle", "blocked"].includes(st.state)) b.push(this._button("activate", "Activate", entityId));
-      if (st.state === "blocked") b.push(this._button("clear_block", "Clear block", entityId));
-      if (st.state === "active_timer") b.push(this._button("enable_block", "Block", entityId));
-      if (b.length) buttons = `<div class="buttons">${b.join("")}</div>`;
-    }
+    const buttons = this._config.show_buttons ? this._buttons(st, entityId) : "";
 
     return `
       ${this._globalOffBanner()}
@@ -327,6 +331,16 @@ class EntityControllerCard extends HTMLElement {
     return `<button data-action="${service}" data-entity="${esc(entityId)}">${label}</button>`;
   }
 
+  /** Activate / Clear block / Block, whichever the current state allows. */
+  _buttons(st, entityId) {
+    const b = [];
+    // idle and blocked are the only states with an `activate` transition
+    if (["idle", "blocked"].includes(st.state)) b.push(this._button("activate", "Activate", entityId));
+    if (st.state === "blocked") b.push(this._button("clear_block", "Clear block", entityId));
+    if (st.state === "active_timer") b.push(this._button("enable_block", "Block", entityId));
+    return b.length ? `<div class="buttons">${b.join("")}</div>` : "";
+  }
+
   _renderList() {
     const hass = this._hass;
     let rows = this._list.map((item) => ({ item, st: hass.states[item.entity] }));
@@ -347,15 +361,40 @@ class EntityControllerCard extends HTMLElement {
     }
     rows = rows.map(({ item, st }) => {
         const meta = STATE_META[st?.state] || STATE_META.unavailable;
-        const detail = st ? this._stateLines(st, true).join("") : `<div class="line">not found</div>`;
+        const open = !!st && this._isOpen(item.entity);
+        let detail = `<div class="line">not found</div>`;
+        let extra = "";
+        if (st) {
+          // expanded rows get the detail card's full lines, notes, entity chips and buttons
+          const lines = this._stateLines(st, !open);
+          if (open && st.attributes?.notes) lines.push(`<div class="note">${esc(st.attributes.notes)}</div>`);
+          detail = lines.join("");
+          if (open) {
+            const parts = [
+              this._config.show_entities ? this._entityRows(st.attributes || {}) : "",
+              this._config.show_buttons ? this._buttons(st, item.entity) : "",
+            ].join("");
+            // data-action="none": taps on the empty parts of the panel do not open more-info
+            if (parts) extra = `<div class="rexpand" data-action="none">${parts}</div>`;
+          }
+        }
+        const toggle = st
+          ? `<span class="rtoggle" data-action="toggle" data-entity="${esc(item.entity)}">${open ? "Less" : "More info"}<ha-icon icon="${open ? "mdi:chevron-up" : "mdi:chevron-down"}"></ha-icon></span>`
+          : "";
         return `
-          <div class="row" data-action="more-info" data-entity="${esc(item.entity)}">
-            <ha-icon icon="${meta.icon}" style="color:${meta.color}"></ha-icon>
-            <div class="rtext">
-              <div class="rname">${esc(item.name || friendly(hass, item.entity))}<span class="rdelay">${minutes(st?.attributes?.delay) ?? ""}${st?.attributes?.delay ? " min" : ""}</span></div>
-              <div class="rdetail">${detail}</div>
+          <div class="item ${open ? "open" : ""}">
+            <div class="row" data-action="more-info" data-entity="${esc(item.entity)}">
+              <ha-icon icon="${meta.icon}" style="color:${meta.color}"></ha-icon>
+              <div class="rtext">
+                <div class="rname">${esc(item.name || friendly(hass, item.entity))}<span class="rdelay">${minutes(st?.attributes?.delay) ?? ""}${st?.attributes?.delay ? " min" : ""}</span></div>
+                <div class="rdetail">${detail}</div>
+              </div>
+              <div class="rside">
+                <div class="chip" style="background:${meta.color}">${meta.label}</div>
+                ${toggle}
+              </div>
             </div>
-            <div class="chip" style="background:${meta.color}">${meta.label}</div>
+            ${extra}
           </div>`;
       });
     const title = this._config.title ? `<div class="head"><div class="titles"><div class="name">${esc(this._config.title)}</div></div></div>` : "";
@@ -382,6 +421,13 @@ class EntityControllerCard extends HTMLElement {
     if (!target) return;
     ev.stopPropagation();
     const { action, entity } = target.dataset;
+    if (action === "none") return;
+    if (action === "toggle") {
+      if (this._flipped.has(entity)) this._flipped.delete(entity);
+      else this._flipped.add(entity);
+      this._render();
+      return;
+    }
     if (action === "more-info") {
       this.dispatchEvent(new CustomEvent("hass-more-info", { bubbles: true, composed: true, detail: { entityId: entity } }));
       return;
@@ -421,8 +467,15 @@ const STYLE = `<style>
   button { background: none; border: 1px solid var(--primary-color); color: var(--primary-color); border-radius: 6px; padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
   button:hover { background: var(--primary-color); color: #fff; }
   .list { display:flex; flex-direction:column; }
-  .row { display:flex; align-items:center; gap:12px; padding: 8px 0; border-bottom: 1px solid var(--divider-color); cursor:pointer; }
-  .row:last-child { border-bottom: none; }
+  .item { border-bottom: 1px solid var(--divider-color); }
+  .item:last-child { border-bottom: none; }
+  .row { display:flex; align-items:center; gap:12px; padding: 8px 0; cursor:pointer; }
+  .rside { display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+  .rtoggle { display:inline-flex; align-items:center; gap:2px; color: var(--primary-color); font-size: 12px; cursor:pointer; padding: 2px 0 2px 8px; }
+  .row .rtoggle ha-icon { --mdc-icon-size: 16px; }
+  .rexpand { margin: 0 0 10px 36px; cursor: default; }  /* 36px = row icon + gap, so it lines up under the name */
+  .rexpand .entities { margin-top: 0; padding-top: 6px; }
+  .rexpand .buttons { margin-top: 8px; }
   .row ha-icon { --mdc-icon-size: 24px; flex:none; }
   .rtext { flex:1; min-width:0; }
   .rname { font-weight: 500; color: var(--primary-text-color); }
@@ -447,6 +500,7 @@ const EDITOR_LABELS = {
   show_buttons: "Show action buttons",
   sort_by_state: "Sort by state (off keeps the order below)",
   show_states: "Only show controllers in these states (empty shows all)",
+  expanded: "Expand every row (sensors, lights and buttons)",
 };
 
 /** ha-form is part of HA's editor bundle; make sure it is loaded before we render it. */
@@ -509,6 +563,7 @@ class EntityControllerCardEditor extends HTMLElement {
           this._modeSchema(),
           { name: "title", selector: { text: {} } },
           { name: "sort_by_state", selector: { boolean: {} } },
+          { name: "expanded", selector: { boolean: {} } },
           {
             name: "show_states",
             selector: {
@@ -540,6 +595,7 @@ class EntityControllerCardEditor extends HTMLElement {
       show_buttons: this._config.show_buttons !== false,
       sort_by_state: this._config.sort_by_state !== false,
       show_states: Array.isArray(this._config.show_states) ? this._config.show_states : [],
+      expanded: this._config.expanded === true,
     };
   }
 
@@ -581,6 +637,7 @@ class EntityControllerCardEditor extends HTMLElement {
       if (v.title) config.title = v.title;
       if (v.sort_by_state === false) config.sort_by_state = false;
       if (Array.isArray(v.show_states) && v.show_states.length) config.show_states = v.show_states;
+      if (v.expanded === true) config.expanded = true;
       const previous = Array.isArray(this._config.entities) ? this._config.entities : [];
       if (this._rows) {
         config.entities = previous;  // the row editor owns the list
