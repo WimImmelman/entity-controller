@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+<a name="9.18.0"></a>
+## [9.18.0](https://github.com/WimImmelman/entity-controller/compare/v9.17.4...v9.18.0) (2026-11-27)
+
+
+### Features
+
+* **Card: `show_states` filter** – In list mode the dashboard card can be limited to controllers in chosen states, e.g. `show_states: [active_timer, active_stay_on, blocked]` for a wall panel that only shows what is running. While nothing matches the card hides itself, so a sections view leaves no empty slot; it stays visible with the banner while `switch.entity_controller` is off, and always shows in the card editor preview. The visual editor has a state picker for it.
+
 <a name="9.17.4"></a>
 ## [9.17.4](https://github.com/WimImmelman/entity-controller/compare/v9.17.3...v9.17.4) (2026-11-25)
 
