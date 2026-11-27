@@ -12,7 +12,10 @@
 //       name: Boundary
 //
 // Options: name, show_entities (default true), show_buttons (default true),
-// sort_by_state (list mode, default true; false keeps the configured order).
+// sort_by_state (list mode, default true; false keeps the configured order),
+// show_states (list mode: only list controllers in these states, e.g.
+// [active_timer, blocked]; the card hides itself while none match and
+// switch.entity_controller is on).
 
 const CARD_TYPE = "entity-controller-card";
 const GLOBAL_SWITCH = "switch.entity_controller";
@@ -155,11 +158,33 @@ class EntityControllerCard extends HTMLElement {
 
   _render() {
     if (!this._hass || !this._config) return;
-    const html = this._list ? this._renderList() : this._renderDetail(this._config.entity, this._config.name);
+    let html = this._list ? this._renderList() : this._renderDetail(this._config.entity, this._config.name);
+    this._setVisible(html !== "");
+    if (html === "" && this.preview) html = `<div class="empty">No controller is in ${esc(this._config.show_states.join(", "))} right now; the card is hidden on the dashboard.</div>`;
     if (html === this._rendered) return; // nothing changed, keep the DOM (and the countdown spans) stable
     this._rendered = html;
-    this.innerHTML = `<ha-card>${STYLE}${html}</ha-card>`;
+    this.innerHTML = html ? `<ha-card>${STYLE}${html}</ha-card>` : "";
     this._updateCountdowns();
+  }
+
+  /** HA sets `preview` on cards shown in the card editor; keep them visible there. */
+  set preview(value) {
+    this._preview = !!value;
+    if (this._hass) this._render();
+  }
+
+  get preview() {
+    return this._preview === true;
+  }
+
+  /** Hide the whole card (and its grid cell) while a show_states list matches nothing.
+   *  hui-card re-checks `hidden` on card-visibility-changed, the same way the
+   *  conditional card does it. */
+  _setVisible(visible) {
+    const show = visible || this.preview;
+    if (this.hidden === !show) return;
+    this.hidden = !show;
+    this.dispatchEvent(new CustomEvent("card-visibility-changed", { bubbles: true, composed: true, detail: { value: show } }));
   }
 
   _globalOffBanner() {
@@ -305,6 +330,14 @@ class EntityControllerCard extends HTMLElement {
   _renderList() {
     const hass = this._hass;
     let rows = this._list.map((item) => ({ item, st: hass.states[item.entity] }));
+    const filter = Array.isArray(this._config.show_states) && this._config.show_states.length
+      ? new Set(this._config.show_states)
+      : null;
+    if (filter) {
+      rows = rows.filter(({ st }) => st && filter.has(st.state));
+      // nothing to show: no card at all, unless the global-off banner has something to say
+      if (!rows.length && !this._globalOffBanner()) return "";
+    }
     if (this._config.sort_by_state) {
       rows = rows.sort((x, y) => {
         const ox = (STATE_META[x.st?.state] || STATE_META.unavailable).order;
@@ -374,6 +407,7 @@ const STYLE = `<style>
   .line b { font-weight: 600; }
   .note { color: var(--secondary-text-color); font-style: italic; font-size: 12px; margin-top:2px; }
   .warn { color: var(--error-color, #db4437); }
+  .empty { color: var(--secondary-text-color); font-style: italic; }
   .entities { border-top: 1px solid var(--divider-color); margin-top: 8px; padding-top: 8px; display:flex; flex-direction:column; gap:4px; }
   .group { display:flex; align-items:flex-start; gap:6px; }
   .glabel { color: var(--secondary-text-color); font-size: 12px; width: 62px; flex:none; line-height: 20px; }
@@ -412,6 +446,7 @@ const EDITOR_LABELS = {
   show_entities: "Show sensors and lights",
   show_buttons: "Show action buttons",
   sort_by_state: "Sort by state (off keeps the order below)",
+  show_states: "Only show controllers in these states (empty shows all)",
 };
 
 /** ha-form is part of HA's editor bundle; make sure it is loaded before we render it. */
@@ -474,6 +509,17 @@ class EntityControllerCardEditor extends HTMLElement {
           this._modeSchema(),
           { name: "title", selector: { text: {} } },
           { name: "sort_by_state", selector: { boolean: {} } },
+          {
+            name: "show_states",
+            selector: {
+              select: {
+                multiple: true,
+                mode: "list",
+                options: ["active_timer", "active_stay_on", "blocked", "overridden", "idle", "constrained", "pending"]
+                  .map((s) => ({ value: s, label: STATE_META[s].label === "Active" ? `Active (${s})` : STATE_META[s].label })),
+              },
+            },
+          },
           ...(this._rows ? [] : [{ name: "entities", selector: { entity: { domain: "entity_controller", multiple: true } } }]),
         ]
       : [
@@ -493,6 +539,7 @@ class EntityControllerCardEditor extends HTMLElement {
       show_entities: this._config.show_entities !== false,
       show_buttons: this._config.show_buttons !== false,
       sort_by_state: this._config.sort_by_state !== false,
+      show_states: Array.isArray(this._config.show_states) ? this._config.show_states : [],
     };
   }
 
@@ -533,6 +580,7 @@ class EntityControllerCardEditor extends HTMLElement {
     if (v.mode === "list") {
       if (v.title) config.title = v.title;
       if (v.sort_by_state === false) config.sort_by_state = false;
+      if (Array.isArray(v.show_states) && v.show_states.length) config.show_states = v.show_states;
       const previous = Array.isArray(this._config.entities) ? this._config.entities : [];
       if (this._rows) {
         config.entities = previous;  // the row editor owns the list
